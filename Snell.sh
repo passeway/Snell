@@ -12,10 +12,11 @@ install_snell() {
     apt-get install -y docker.io || { echo "安装 Docker 失败。退出..." ; exit 1; }
     echo "Docker 安装完成。"
 
-    # 安装 Docker Compose 插件
-    echo "正在安装 Docker Compose 插件..."
-    apt-get install docker-compose-plugin -y || { echo "安装 Docker Compose 插件失败。退出..." ; exit 1; }
-    echo "Docker Compose 插件安装完成。"
+    # 安装 Docker Compose
+    echo "正在安装 Docker Compose..."
+    curl -fsSL https://get.docker.com -o /usr/local/bin/docker-compose || { echo "下载 Docker Compose 失败。退出..." ; exit 1; }
+    chmod +x /usr/local/bin/docker-compose || { echo "设置 Docker Compose 可执行权限失败。退出..." ; exit 1; }
+    echo "Docker Compose 安装完成。"
 
     # 创建所需目录
     echo "正在创建目录..."
@@ -89,6 +90,12 @@ EOF
     # 输出所需信息，包含IP所在国家
     echo "$IP_COUNTRY = snell, $HOST_IP, $RANDOM_PORT, psk = $RANDOM_PSK, version = 4, reuse = true, tfo = true"
     echo "安装完成。"
+
+    # 删除脚本
+    echo "正在删除脚本..."
+    rm -- "$0"
+    echo "脚本已删除。"
+    exit 0
 }
 
 # 函数：卸载 Snell
@@ -110,17 +117,21 @@ uninstall_snell() {
     fi
 
     if [ -x "$(command -v docker-compose)" ]; then
-        echo "正在卸载 Docker Compose 插件..."
-        apt-get remove --purge -y docker-compose-plugin >/dev/null 2>&1
-        apt-get autoremove -y >/dev/null 2>&1
-        echo "Docker Compose 插件已卸载。"
+        echo "正在卸载 Docker Compose..."
+        rm /usr/local/bin/docker-compose >/dev/null 2>&1
+        echo "Docker Compose 已卸载。"
     else
-        echo "Docker Compose 插件未安装，跳过卸载步骤。"
+        echo "Docker Compose 未安装，跳过卸载步骤。"
     fi
 
     docker system prune -a -f >/dev/null 2>&1
 
     echo "卸载完成。"
+    # 删除脚本
+    echo "正在删除脚本..."
+    rm -- "$0"
+    echo "脚本已删除。"
+    exit 0
 }
 
 # 函数：输出 Snell 信息
@@ -130,32 +141,5 @@ output_snell_info() {
     # 这里可以添加输出 Snell 信息的相关命令
 
     echo "获取 Snell 信息完成。"
-}
-
-# 主函数
-main() {
-    echo "请选择操作："
-    echo "1. 安装 Snell"
-    echo "2. 卸载 Snell"
-    echo "3. 输出 Snell 信息"
-    read -p "请输入选项编号： " option
-
-    case $option in
-        1)
-            install_snell
-            ;;
-        2)
-            uninstall_snell
-            ;;
-        3)
-            output_snell_info
-            ;;
-        *)
-            echo "无效选项。退出..."
-            exit 1
-            ;;
-    esac
-}
-
-# 调用主函数
-main
+    # 删除脚本
+    echo "正在删除
