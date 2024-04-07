@@ -8,6 +8,9 @@ install_snell() {
     # 安装 Docker
     curl -fsSL https://get.docker.com | bash -s docker
 
+    # 安装 Docker Compose
+    curl -fsSL https://get.docker.com | bash -s docker-compose
+
     # 判断并卸载不同版本的 Docker Compose
     if [ -f "/usr/local/bin/docker-compose" ]; then
         sudo rm /usr/local/bin/docker-compose
