@@ -25,6 +25,12 @@ mkdir -p /root/snelldocker/snell-conf
 RANDOM_PORT=$(shuf -i 30000-65000 -n 1)
 RANDOM_PSK=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 20)
 
+# 设置 Snell 服务器的 URL，考虑 ARM 架构
+SNELL_URL="https://dl.nssurge.com/snell/snell-server-v4.0.1-linux-amd64.zip"
+if [[ $(arch) == "aarch64" ]]; then
+    SNELL_URL="https://dl.nssurge.com/snell/snell-server-v4.0.1-linux-aarch64.zip"
+fi
+
 # 创建 docker-compose.yml
 cat > /root/snelldocker/docker-compose.yml << EOF
 version: "3.8"
@@ -37,7 +43,7 @@ services:
     volumes:
       - ./snell-conf/snell.conf:/etc/snell-server.conf
     environment:
-      - SNELL_URL=https://dl.nssurge.com/snell/snell-server-v4.0.1-linux-amd64.zip
+      - SNELL_URL=$SNELL_URL
 EOF
 
 # 创建 snell.conf 配置文件
