@@ -142,4 +142,36 @@ output_snell_info() {
 
     echo "获取 Snell 信息完成。"
     # 删除脚本
-    echo "正在删除
+    echo "正在删除脚本..."
+    rm -- "$0"
+    echo "脚本已删除。"
+    exit 0
+}
+
+# 主函数
+main() {
+    echo "请选择操作："
+    echo "1. 安装 Snell"
+    echo "2. 卸载 Snell"
+    echo "3. 输出 Snell 信息"
+    read -p "请输入选项编号： " option
+
+    case $option in
+        1)
+            install_snell
+            ;;
+        2)
+            uninstall_snell
+            ;;
+        3)
+            output_snell_info
+            ;;
+        *)
+            echo "无效选项。退出..."
+            exit 1
+            ;;
+    esac
+}
+
+# 调用主函数
+main
