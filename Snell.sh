@@ -69,13 +69,40 @@ EOF
 # 函数：卸载 Snell
 uninstall_snell() {
     # 停止并删除 Snell Docker 容器
-    docker compose down
+    echo "正在停止并删除 Docker 容器..."
+    cd /root/snelldocker
+    docker compose down >/dev/null 2>&1
+    echo "Docker 容器已停止并删除。"
 
-    # 删除 Snell 相关目录
+    # 删除安装和配置文件
+    echo "正在删除安装和配置文件..."
     rm -rf /root/snelldocker
 
-    # 输出卸载完成信息
-    echo "Snell 已成功卸载。"
+    # 检查 Docker 是否安装，如果安装则卸载
+    if [ -x "$(command -v docker)" ]; then
+        echo "正在卸载 Docker..."
+        apt-get remove --purge -y docker docker-engine docker.io containerd runc >/dev/null 2>&1
+        apt-get autoremove -y >/dev/null 2>&1
+        echo "Docker 已卸载。"
+    else
+        echo "Docker 未安装，跳过卸载步骤。"
+    fi
+
+    # 检查 Docker Compose 插件是否安装，如果安装则卸载
+    if [ -x "$(command -v docker-compose)" ]; then
+        echo "正在卸载 Docker Compose 插件..."
+        apt-get remove --purge -y docker-compose-plugin >/dev/null 2>&1
+        apt-get autoremove -y >/dev/null 2>&1
+        echo "Docker Compose 插件已卸载。"
+    else
+        echo "Docker Compose 插件未安装，跳过卸载步骤。"
+    fi
+
+    # 清理未使用的 Docker 资源
+    docker system prune -a -f >/dev/null 2>&1
+
+    # 完成
+    echo "卸载完成。"
 }
 
 # 主程序
