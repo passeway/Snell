@@ -49,27 +49,27 @@ install_snell() {
     # 创建 docker-compose.yml
     echo "正在创建 docker-compose.yml 文件..."
     cat > /root/snelldocker/docker-compose.yml << EOF || { echo "创建 docker-compose.yml 文件失败。退出..." ; exit 1; }
-    version: "3.8"
-    services:
-      snell:
-        image: $DOCKER_IMAGE
-        container_name: snell
-        restart: always
-        network_mode: host
-        volumes:
-          - ./snell-conf/snell.conf:/etc/snell-server.conf
-        environment:
-          - SNELL_URL=$SNELL_BINARY_URL
+version: "3.8"
+services:
+  snell:
+    image: $DOCKER_IMAGE
+    container_name: snell
+    restart: always
+    network_mode: host
+    volumes:
+      - ./snell-conf/snell.conf:/etc/snell-server.conf
+    environment:
+      - SNELL_URL=$SNELL_BINARY_URL
 EOF
     echo "docker-compose.yml 文件创建完成。"
 
     # 创建 snell.conf 配置文件
     echo "正在创建 snell.conf 配置文件..."
     cat > /root/snelldocker/snell-conf/snell.conf << EOF || { echo "创建 snell.conf 配置文件失败。退出..." ; exit 1; }
-    [snell-server]
-    listen = ::0:$RANDOM_PORT
-    psk = $RANDOM_PSK
-    ipv6 = false
+[snell-server]
+listen = ::0:$RANDOM_PORT
+psk = $RANDOM_PSK
+ipv6 = false
 EOF
     echo "snell.conf 配置文件创建完成。"
 
