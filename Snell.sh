@@ -76,10 +76,10 @@ uninstall_snell() {
 }
 
 # 判断用户选择的选项
-echo "Select an option:"
-echo "1. Install Snell"
-echo "2. Uninstall Snell and Docker"
-read -p "Enter your choice (1 or 2): " choice
+echo "请选择一个操作："
+echo "1. 安装 Snell"
+echo "2. 卸载 Snell 和 Docker"
+read -p "请输入您的选择（1 或 2）: " choice
 
 case $choice in
     1)
@@ -89,6 +89,6 @@ case $choice in
         uninstall_snell
         ;;
     *)
-        echo "Invalid choice. Exiting."
+        echo "无效的选择。退出。"
         ;;
 esac
