@@ -37,7 +37,7 @@ install_snell() {
         restart: always
         network_mode: host
         volumes:
-          - ./snell-conf/snell.conf:/etc/snell-server.conf
+          - /root/snelldocker/snell-conf/snell.conf:/etc/snell-server.conf
         environment:
           - SNELL_URL=https://dl.nssurge.com/snell/snell-server-v4.0.1-linux-amd64.zip
 EOF
@@ -62,7 +62,7 @@ EOF
     cat snell-conf/snell.conf
 
     # 拉取并启动 Docker 容器
-    docker compose pull && docker compose up -d
+    docker-compose up -d
 
     # 获取本机IP地址
     HOST_IP=$(curl -s http://checkip.amazonaws.com)
@@ -77,7 +77,7 @@ EOF
 # 添加函数以卸载 Snell 及此项目的 Docker
 uninstall_snell() {
     # 停止并删除 Snell 容器
-    docker compose down
+    docker-compose down
 
     # 删除安装目录
     rm -rf /root/snelldocker
