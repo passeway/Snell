@@ -14,7 +14,7 @@ install_snell() {
 
     # 安装 Docker Compose
     echo "正在安装 Docker Compose..."
-    curl -fsSL https://get.docker.com -o /usr/local/bin/docker-compose || { echo "下载 Docker Compose 失败。退出..." ; exit 1; }
+    curl -L "https://github.com/docker/compose/releases/download/1.29.2/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose || { echo "下载 Docker Compose 失败。退出..." ; exit 1; }
     chmod +x /usr/local/bin/docker-compose || { echo "设置 Docker Compose 可执行权限失败。退出..." ; exit 1; }
     echo "Docker Compose 安装完成。"
 
@@ -78,7 +78,7 @@ EOF
 
     # 拉取并启动 Docker 容器
     echo "正在拉取并启动 Docker 容器..."
-    docker compose pull && docker compose up -d || { echo "拉取并启动 Docker 容器失败。退出..." ; exit 1; }
+    docker-compose pull && docker-compose up -d || { echo "拉取并启动 Docker 容器失败。退出..." ; exit 1; }
     echo "Docker 容器拉取并启动完成。"
 
     # 获取本机IP地址
