@@ -70,13 +70,13 @@ EOF
 uninstall_snell() {
     # 停止并删除 Snell Docker 容器
     echo "正在停止并删除 Docker 容器..."
-    cd /root/snelldocker
+    cd /root/snell
     docker compose down >/dev/null 2>&1
     echo "Docker 容器已停止并删除。"
 
     # 删除安装和配置文件
     echo "正在删除安装和配置文件..."
-    rm -rf /root/snelldocker
+    rm -rf /root/snell
 
     # 检查 Docker 是否安装，如果安装则卸载
     if [ -x "$(command -v docker)" ]; then
