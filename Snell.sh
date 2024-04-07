@@ -53,6 +53,14 @@ EOF
     # 切换目录
     cd /root/snelldocker
 
+    # 输出目录内容，以便检查文件是否存在
+    echo "当前目录内容:"
+    ls -la
+
+    # 输出配置文件内容，以便检查是否正确生成
+    echo "生成的 snell.conf 内容:"
+    cat snell-conf/snell.conf
+
     # 拉取并启动 Docker 容器
     docker compose pull && docker compose up -d
 
