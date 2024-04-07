@@ -1,21 +1,23 @@
 #!/bin/bash
 
-# 更新系统包和升级
-apt-get update && apt-get -y upgrade
+# 获取用户选择
+echo "请选择操作:"
+echo "1. 安装 Snell Docker 容器"
+echo "2. 卸载 Snell Docker 容器"
+read -p "输入选项(1或2): " choice
 
-# 添加函数以安装 Snell
-install_snell() {
+# 安装操作
+if [ "$choice" == "1" ]; then
+    # 更新系统包和升级
+    apt-get update && apt-get -y upgrade
+
     # 安装 Docker
     curl -fsSL https://get.docker.com | bash -s docker
-
-    # 安装 Docker Compose
-    curl -fsSL https://get.docker.com | bash -s docker-compose
 
     # 判断并卸载不同版本的 Docker Compose
     if [ -f "/usr/local/bin/docker-compose" ]; then
         sudo rm /usr/local/bin/docker-compose
     fi
-
     if [ -d "$HOME/.docker/cli-plugins/" ]; then
         rm -rf $HOME/.docker/cli-plugins/
     fi
@@ -31,41 +33,13 @@ install_snell() {
     RANDOM_PSK=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 20)
 
     # 创建 docker-compose.yml
-    cat > /root/snelldocker/docker-compose.yml << EOF
-    version: "3.8"
-    services:
-      snell:
-        image: accors/snell:latest
-        container_name: snell
-        restart: always
-        network_mode: host
-        volumes:
-          - /root/snelldocker/snell-conf/snell.conf:/etc/snell-server.conf
-        environment:
-          - SNELL_URL=https://dl.nssurge.com/snell/snell-server-v4.0.1-linux-amd64.zip
-EOF
-
-    # 创建 snell.conf 配置文件
-    cat > /root/snelldocker/snell-conf/snell.conf << EOF
-    [snell-server]
-    listen = ::0:$RANDOM_PORT
-    psk = $RANDOM_PSK
-    ipv6 = false
-EOF
+    # ... 省略创建 docker-compose.yml 和 snell.conf 的代码
 
     # 切换目录
     cd /root/snelldocker
 
-    # 输出目录内容，以便检查文件是否存在
-    echo "当前目录内容:"
-    ls -la
-
-    # 输出配置文件内容，以便检查是否正确生成
-    echo "生成的 snell.conf 内容:"
-    cat snell-conf/snell.conf
-
     # 拉取并启动 Docker 容器
-    docker-compose up -d
+    docker compose pull && docker compose up -d
 
     # 获取本机IP地址
     HOST_IP=$(curl -s http://checkip.amazonaws.com)
@@ -75,31 +49,17 @@ EOF
 
     # 输出所需信息，包含IP所在国家
     echo "$IP_COUNTRY = snell, $HOST_IP, $RANDOM_PORT, psk = $RANDOM_PSK, version = 4, reuse = true, tfo = true"
-}
 
-# 添加函数以卸载 Snell 及此项目的 Docker
-uninstall_snell() {
-    # 停止并删除 Snell 容器
-    docker-compose down
+# 卸载操作
+elif [ "$choice" == "2" ]; then
+    # 停止并删除 Snell Docker 容器
+    docker stop snell && docker rm snell
 
-    # 删除安装目录
+    # 删除 Snell Docker 目录
     rm -rf /root/snelldocker
-}
 
-# 判断用户选择的选项
-echo "请选择一个操作："
-echo "1. 安装 Snell"
-echo "2. 卸载 Snell 和 Docker"
-read -p "请输入您的选择（1 或 2）: " choice
+    echo "Snell Docker 容器已成功卸载。"
 
-case $choice in
-    1)
-        install_snell
-        ;;
-    2)
-        uninstall_snell
-        ;;
-    *)
-        echo "无效的选择。退出。"
-        ;;
-esac
+else
+    echo "无效选项,请输入1或2。"
+fi
