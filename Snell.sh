@@ -7,6 +7,11 @@ install_snell() {
     apt-get update && apt-get -y upgrade || { echo "更新失败。退出..." ; exit 1; }
     echo "系统包更新完成。"
 
+    # 安装依赖关系
+    echo "正在安装依赖关系..."
+    apt-get install -y curl || { echo "安装依赖关系失败。退出..." ; exit 1; }
+    echo "依赖关系安装完成。"
+
     # 安装 Docker
     echo "正在安装 Docker..."
     apt-get install -y docker.io || { echo "安装 Docker 失败。退出..." ; exit 1; }
@@ -18,8 +23,23 @@ install_snell() {
     chmod +x /usr/local/bin/docker-compose || { echo "设置 Docker Compose 可执行权限失败。退出..." ; exit 1; }
     echo "Docker Compose 安装完成。"
 
+    # 检查 Docker 版本
+    docker_version=$(docker --version | awk '{print $3}' | cut -d',' -f1)
+    echo "已安装 Docker 版本为: $docker_version"
+
+    # 检查 containerd 版本
+    containerd_version=$(dpkg -s containerd.io | grep Version | cut -d' ' -f2)
+    echo "已安装 containerd 版本为: $containerd_version"
+
+    # 如果 containerd 版本不满足要求，则尝试安装正确版本的 containerd
+    if dpkg --compare-versions "$containerd_version" "lt" "1.2.6-0ubuntu1~"; then
+        echo "正在安装正确版本的 containerd..."
+        apt-get install -y containerd.io || { echo "安装 containerd 失败。退出..." ; exit 1; }
+        echo "containerd 安装完成。"
+    fi
+
     # 创建所需目录
-    echo "正在创建目录..."
+    echo "正在创建所需目录..."
     mkdir -p /root/snelldocker/snell-conf || { echo "创建目录失败。退出..." ; exit 1; }
     echo "目录创建完成。"
 
@@ -27,45 +47,9 @@ install_snell() {
     RANDOM_PORT=$(shuf -i 30000-65000 -n 1)
     RANDOM_PSK=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 20)
 
-    # 获取机器架构信息
-    MACHINE_ARCH=$(uname -m)
-
-    # 根据机器架构选择 Docker 映像和 Snell 二进制文件
-    case $MACHINE_ARCH in
-        x86_64)
-            DOCKER_IMAGE="accors/snell:latest"
-            SNELL_BINARY_URL="https://dl.nssurge.com/snell/snell-server-v4.0.1-linux-amd64.zip"
-            ;;
-        aarch64)
-            DOCKER_IMAGE="accors/snell-arm:latest"
-            SNELL_BINARY_URL="https://dl.nssurge.com/snell/snell-server-v4.0.1-linux-arm.zip"
-            ;;
-        *)
-            echo "不支持的架构类型: $MACHINE_ARCH。退出..."
-            exit 1
-            ;;
-    esac
-
-    # 创建 docker-compose.yml
-    echo "正在创建 docker-compose.yml 文件..."
-    cat > /root/snelldocker/docker-compose.yml << EOF || { echo "创建 docker-compose.yml 文件失败。退出..." ; exit 1; }
-version: "3.8"
-services:
-  snell:
-    image: $DOCKER_IMAGE
-    container_name: snell
-    restart: always
-    network_mode: host
-    volumes:
-      - ./snell-conf/snell.conf:/etc/snell-server.conf
-    environment:
-      - SNELL_URL=$SNELL_BINARY_URL
-EOF
-    echo "docker-compose.yml 文件创建完成。"
-
     # 创建 snell.conf 配置文件
     echo "正在创建 snell.conf 配置文件..."
-    cat > /root/snelldocker/snell-conf/snell.conf << EOF || { echo "创建 snell.conf 配置文件失败。退出..." ; exit 1; }
+    cat > /root/snelldocker/snell-conf/snell.conf << EOF
 [snell-server]
 listen = ::0:$RANDOM_PORT
 psk = $RANDOM_PSK
@@ -73,13 +57,27 @@ ipv6 = false
 EOF
     echo "snell.conf 配置文件创建完成。"
 
-    # 切换目录
-    cd /root/snelldocker || { echo "切换目录失败。退出..." ; exit 1; }
+    # 创建 docker-compose.yml
+    echo "正在创建 docker-compose.yml 文件..."
+    cat > /root/snelldocker/docker-compose.yml << EOF
+version: "3.8"
+services:
+  snell:
+    image: accors/snell:latest
+    container_name: snell
+    restart: always
+    network_mode: host
+    volumes:
+      - ./snell-conf/snell.conf:/etc/snell-server.conf
+    environment:
+      - SNELL_URL=https://dl.nssurge.com/snell/snell-server-v4.0.1-linux-amd64.zip
+EOF
+    echo "docker-compose.yml 文件创建完成。"
 
-    # 拉取并启动 Docker 容器
-    echo "正在拉取并启动 Docker 容器..."
-    docker-compose pull && docker-compose up -d || { echo "拉取并启动 Docker 容器失败。退出..." ; exit 1; }
-    echo "Docker 容器拉取并启动完成。"
+    # 切换目录并启动 Docker 容器
+    echo "正在启动 Docker 容器..."
+    cd /root/snelldocker && docker-compose up -d || { echo "启动 Docker 容器失败。退出..." ; exit 1; }
+    echo "Docker 容器启动完成。"
 
     # 获取本机IP地址
     HOST_IP=$(curl -s http://checkip.amazonaws.com)
@@ -89,8 +87,8 @@ EOF
 
     # 输出所需信息，包含IP所在国家
     echo "$IP_COUNTRY = snell, $HOST_IP, $RANDOM_PORT, psk = $RANDOM_PSK, version = 4, reuse = true, tfo = true"
-    echo "安装完成。"
 
+    echo "Snell 信息完成。"
     # 删除脚本
     echo "正在删除脚本..."
     rm -- "$0"
