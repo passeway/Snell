@@ -21,23 +21,6 @@ install_dependencies() {
     fi
 }
 
-check_install_status() {
-    if [ -f "/usr/local/bin/snell-server" ]; then
-        echo "Snell 已安装."
-    else
-        echo "Snell 未安装."
-    fi
-}
-
-check_running_status() {
-    sudo systemctl status snell | grep "Active: active" > /dev/null
-    if [ $? -eq 0 ]; then
-        echo "Snell 服务正在运行."
-    else
-        echo "Snell 服务未在运行."
-    fi
-}
-
 install_snell() {
     # 安装依赖
     install_dependencies
@@ -147,8 +130,31 @@ EOF
     echo "Snell 安装成功."
     echo "$IP_COUNTRY = snell, $HOST_IP, $RANDOM_PORT, psk = $RANDOM_PSK, version = 4, reuse = true, tfo = true" > /etc/snell_output.txt
 
-    # 显示 Snell 输出信息
+    # 调用查看 Snell 输出信息函数
     view_snell_logs
+}
+
+check_install_status() {
+    if [ -f "/usr/local/bin/snell-server" ]; then
+        echo "Snell 已安装."
+    else
+        echo "Snell 未安装."
+    fi
+}
+
+check_running_status() {
+    sudo systemctl status snell | grep "Active: active" > /dev/null
+    if [ $? -eq 0 ]; then
+        echo "Snell 服务正在运行."
+    else
+        echo "Snell 服务未在运行."
+    fi
+}
+
+view_snell_logs() {
+    # 查看 Snell 输出信息
+    echo "Snell 安装成功后输出的信息:"
+    cat /etc/snell_output.txt
 }
 
 check_install_status
