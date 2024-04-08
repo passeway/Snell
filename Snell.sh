@@ -1,5 +1,11 @@
 #!/bin/bash
 
+# 提示用户需要 root 权限运行脚本
+if [ "$(id -u)" != "0" ]; then
+    echo "请以 root 权限运行此脚本."
+    exit 1
+fi
+
 install_snell() {
     # 更新系统包和升级
     apt-get update && apt-get -y upgrade
