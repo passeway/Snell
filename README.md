@@ -9,8 +9,3 @@
 - 执行完脚本后，你会得到服务器的 IP 地址、端口号、PSK 等相关信息。
 
 
-## 感谢
-
-特别感谢 [Surge Networks](https://github.com/surge-networks) 团队开发的 Snell 代理服务器，以及 Docker 社区提供的容器化支持。
-
-感谢您的使用！
