@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# 检查是否具有 root 权限
+# 提示用户需要 root 权限运行脚本
 if [ "$(id -u)" != "0" ]; then
     echo "请以 root 权限运行此脚本."
     exit 1
@@ -11,7 +11,7 @@ install_snell() {
     apt-get update && apt-get -y upgrade
 
     # 安装必要的软件包
-    apt-get install -y unzip wget curl expect
+    apt-get install -y unzip wget curl
 
     # 下载 Snell 服务器文件
     SNELL_VERSION="v4.0.1"
@@ -48,29 +48,20 @@ install_snell() {
     # 赋予执行权限
     chmod +x $INSTALL_DIR/snell-server
 
+    # 生成随机端口和密码
+    RANDOM_PORT=$(shuf -i 30000-65000 -n 1)
+    RANDOM_PSK=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 20)
+
     # 创建配置文件目录
     mkdir -p $CONF_DIR
 
-    # 使用 expect 自动化生成配置文件
-    expect << EOF
-spawn $INSTALL_DIR/snell-server --wizard -c $CONF_FILE
-expect "Create new? \[Y/n\]" { send "Y\r" }
-expect "Listening address:" { send "\r" }
-expect "Listening port:" { send "\r" }
-expect "PSK:" { send "\r" }
-expect "Use IPv6?" { send "n\r" }
-expect eof
+    # 创建配置文件
+    cat > $CONF_FILE << EOF
+[snell-server]
+listen = ::0:$RANDOM_PORT
+psk = $RANDOM_PSK
+ipv6 = false
 EOF
-
-    # 确认配置文件是否存在
-    if [ ! -f "$CONF_FILE" ]; then
-        echo "配置文件不存在."
-        exit 1
-    fi
-
-    # 获取配置中的端口和密码
-    RANDOM_PORT=$(grep -oP '(?<=listen = ::0:)\d+' $CONF_FILE)
-    RANDOM_PSK=$(grep -oP '(?<=psk = )\S+' $CONF_FILE)
 
     # 创建 Systemd 服务文件
     cat > $SYSTEMD_SERVICE_FILE << EOF
@@ -94,21 +85,21 @@ WantedBy=multi-user.target
 EOF
 
     # 重载 Systemd 配置
-    systemctl daemon-reload
+    sudo systemctl daemon-reload
     if [ $? -ne 0 ]; then
         echo "重载 Systemd 配置失败."
         exit 1
     fi
 
     # 开机自启动 Snell
-    systemctl enable snell
+    sudo systemctl enable snell
     if [ $? -ne 0 ]; then
         echo "开机自启动 Snell 失败."
         exit 1
     fi
 
     # 启动 Snell 服务
-    systemctl start snell
+    sudo systemctl start snell
     if [ $? -ne 0 ]; then
         echo "启动 Snell 服务失败."
         exit 1
@@ -117,36 +108,39 @@ EOF
     # 获取本机IP地址
     HOST_IP=$(curl -s http://checkip.amazonaws.com)
 
-    # 输出所需信息，包含IP所在国家、生成的端口和密码
+    # 获取IP所在国家
+    IP_COUNTRY=$(curl -s http://ipinfo.io/$HOST_IP/country)
+
+    # 输出所需信息，包含IP所在国家
     echo "Snell 安装成功."
-    echo "SG = snell, $HOST_IP, $RANDOM_PORT, psk = $RANDOM_PSK, version = 4, reuse = true, tfo = true"
+    echo "$IP_COUNTRY = snell, $HOST_IP, $RANDOM_PORT, psk = $RANDOM_PSK, version = 4, reuse = true, tfo = true"
 }
 
 uninstall_snell() {
     # 停止 Snell 服务
-    systemctl stop snell
+    sudo systemctl stop snell
     if [ $? -ne 0 ]; then
         echo "停止 Snell 服务失败."
         exit 1
     fi
 
     # 禁用开机自启动
-    systemctl disable snell
+    sudo systemctl disable snell
     if [ $? -ne 0 ]; then
         echo "禁用开机自启动失败."
         exit 1
     fi
 
     # 删除 Systemd 服务文件
-    rm /lib/systemd/system/snell.service
+    sudo rm /lib/systemd/system/snell.service
     if [ $? -ne 0 ]; then
         echo "删除 Systemd 服务文件失败."
         exit 1
     fi
 
     # 删除安装的文件和目录
-    rm /usr/local/bin/snell-server
-    rm -rf /etc/snell
+    sudo rm /usr/local/bin/snell-server
+    sudo rm -rf /etc/snell
 
     echo "Snell 卸载成功."
 }
