@@ -128,84 +128,47 @@ EOF
 
     # 输出所需信息，包含IP所在国家
     echo "Snell 安装成功."
-    echo "$IP_COUNTRY = snell, $HOST_IP, $RANDOM_PORT, psk = $RANDOM_PSK, version = 4, reuse = true, tfo = true" > /etc/snell_output.txt
-
-    # 退出脚本
-    exit
+    echo "服务配置信息:"
+    echo "$IP_COUNTRY = snell, $HOST_IP, $RANDOM_PORT, psk = $RANDOM_PSK, version = 4, reuse = true, tfo = true"
 }
 
-uninstall_snell() {
-    # 停止 Snell 服务
-    sudo systemctl stop snell
-    if [ $? -ne 0 ]; then
-        echo "停止 Snell 服务失败."
-        exit 1
+check_install_status() {
+    if [ -f "/usr/local/bin/snell-server" ]; then
+        echo "Snell 已安装."
+    else
+        echo "Snell 未安装."
     fi
-
-    # 禁用开机自启动
-    sudo systemctl disable snell
-    if [ $? -ne 0 ]; then
-        echo "禁用开机自启动失败."
-        exit 1
-    fi
-
-    # 删除 Systemd 服务文件
-    sudo rm /lib/systemd/system/snell.service
-    if [ $? -ne 0 ]; then
-        echo "删除 Systemd 服务文件失败."
-        exit 1
-    fi
-
-    # 删除安装的文件和目录
-    sudo rm /usr/local/bin/snell-server
-    sudo rm -rf /etc/snell
-
-    echo "Snell 卸载成功."
-
-    # 退出脚本
-    exit
 }
 
-restart_snell() {
-    # 重启 Snell 服务
-    sudo systemctl restart snell
-    if [ $? -ne 0 ]; then
-        echo "重启 Snell 服务失败."
-        exit 1
-    fi
-
-    echo "Snell 服务已重启."
-
-    # 退出脚本
-    exit
-}
-
-view_snell_status() {
-    # 查看 Snell 服务状态
+check_running_status() {
     sudo systemctl status snell | grep "Active: active" > /dev/null
     if [ $? -eq 0 ]; then
         echo "Snell 服务正在运行."
     else
         echo "Snell 服务未在运行."
     fi
-
-    # 退出脚本
-    exit
 }
 
-view_snell_logs() {
-    # 查看 Snell 输出信息
-    echo "Snell 安装成功后输出的信息:"
-    cat /etc/snell_output.txt
-
-    # 退出脚本
-    exit
+uninstall_snell() {
+    sudo systemctl stop snell
+    sudo systemctl disable snell
+    sudo rm /usr/local/bin/snell-server
+    sudo rm /lib/systemd/system/snell.service
+    sudo systemctl daemon-reload
+    sudo systemctl reset-failed
+    sudo rm -rf /etc/snell
+    sudo rm -f /etc/snell_output.txt
+    echo "Snell 已卸载."
+    rm -- "$0" # 删除脚本文件
 }
 
 # 显示标题
 echo "=============================="
 echo "Snell Server 管理脚本"
 echo "=============================="
+
+# 安装 Snell
+install_snell
 
 # 显示菜单选项
 echo "选择操作:"
@@ -215,14 +178,17 @@ echo "3. 重启 Snell"
 echo "4. 查看 Snell 服务状态"
 echo "5. 查看 Snell 输出信息"
 echo "输入 0 退出脚本"
+echo ""
+
+# 读取用户输入
 read -p "输入选项: " choice
 
 case $choice in
      1) install_snell ;;
      2) uninstall_snell ;;
      3) restart_snell ;;
-     4) view_snell_status ;;
-     5) view_snell_logs ;;
+     4) check_install_status && check_running_status ;;
+     5) cat /etc/snell_output.txt ;;
      0) exit ;;
      *) echo "无效的选项" ;;
 esac
