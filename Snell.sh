@@ -1,11 +1,30 @@
 #!/bin/bash
 
+install_dependencies() {
+    if [ -x "$(command -v apt-get)" ]; then
+        # Debian/Ubuntu 系统
+        sudo apt-get update && sudo apt-get -y upgrade
+        sudo apt-get install -y unzip wget curl
+    elif [ -x "$(command -v yum)" ]; then
+        # CentOS/RHEL 系统
+        sudo yum update -y
+        sudo yum install -y unzip wget curl
+    elif [ -x "$(command -v dnf)" ]; then
+        # Fedora 系统
+        sudo dnf upgrade -y
+        sudo dnf install -y unzip wget curl
+    else
+        echo "未知的 Linux 发行版，无法安装依赖。"
+        exit 1
+    fi
+}
+
 install_snell() {
+    # 安装依赖
+    install_dependencies
+
     # 更新系统包和升级
     apt-get update && apt-get -y upgrade
-
-    # 安装必要的软件包
-    apt-get install -y unzip wget curl
 
     # 下载 Snell 服务器文件
     SNELL_VERSION="v4.0.1"
@@ -139,14 +158,41 @@ uninstall_snell() {
     echo "Snell 卸载成功."
 }
 
+restart_snell() {
+    # 重启 Snell 服务
+    sudo systemctl restart snell
+    if [ $? -ne 0 ]; then
+        echo "重启 Snell 服务失败."
+        exit 1
+    fi
+
+    echo "Snell 服务已重启."
+}
+
+view_snell_status() {
+    # 查看 Snell 服务状态
+    sudo systemctl status snell
+}
+
+view_snell_logs() {
+    # 查看 Snell 输出信息
+    journalctl -u snell
+}
+
 # 显示菜单选项
 echo "选择操作:"
 echo "1. 安装 Snell"
 echo "2. 卸载 Snell"
+echo "3. 重启 Snell"
+echo "4. 查看 Snell 服务状态"
+echo "5. 查看 Snell 输出信息"
 read -p "输入选项: " choice
 
 case $choice in
     1) install_snell ;;
     2) uninstall_snell ;;
+    3) restart_snell ;;
+    4) view_snell_status ;;
+    5) view_snell_logs ;;
     *) echo "无效的选项" ;;
 esac
