@@ -1,5 +1,7 @@
 #!/bin/bash
 
+# Snell Server 管理脚本
+
 install_dependencies() {
     if [ -x "$(command -v apt-get)" ]; then
         # Debian/Ubuntu 系统
@@ -127,6 +129,9 @@ EOF
     # 输出所需信息，包含IP所在国家
     echo "Snell 安装成功."
     echo "$IP_COUNTRY = snell, $HOST_IP, $RANDOM_PORT, psk = $RANDOM_PSK, version = 4, reuse = true, tfo = true" > /etc/snell_output.txt
+
+    # 退出脚本
+    exit
 }
 
 uninstall_snell() {
@@ -156,6 +161,9 @@ uninstall_snell() {
     sudo rm -rf /etc/snell
 
     echo "Snell 卸载成功."
+
+    # 退出脚本
+    exit
 }
 
 restart_snell() {
@@ -167,6 +175,9 @@ restart_snell() {
     fi
 
     echo "Snell 服务已重启."
+
+    # 退出脚本
+    exit
 }
 
 view_snell_status() {
@@ -177,32 +188,41 @@ view_snell_status() {
     else
         echo "Snell 服务未在运行."
     fi
+
+    # 退出脚本
+    exit
 }
 
 view_snell_logs() {
     # 查看 Snell 输出信息
     echo "Snell 安装成功后输出的信息:"
     cat /etc/snell_output.txt
+
+    # 退出脚本
+    exit
 }
 
-# 显示菜单选项
-while true; do
-    echo "选择操作:"
-    echo "1. 安装 Snell"
-    echo "2. 卸载 Snell"
-    echo "3. 重启 Snell"
-    echo "4. 查看 Snell 服务状态"
-    echo "5. 查看 Snell 输出信息"
-    echo "输入 0 退出脚本"
-    read -p "输入选项: " choice
+# 显示标题
+echo "=============================="
+echo "Snell Server 管理脚本"
+echo "=============================="
 
-    case $choice in
-         1) install_snell ;;
-         2) uninstall_snell ;;
-         3) restart_snell ;;
-         4) view_snell_status ;;
-         5) view_snell_logs ;;
-         0) exit ;;
-         *) echo "无效的选项" ;;
-    esac
-done
+# 显示菜单选项
+echo "选择操作:"
+echo "1. 安装 Snell"
+echo "2. 卸载 Snell"
+echo "3. 重启 Snell"
+echo "4. 查看 Snell 服务状态"
+echo "5. 查看 Snell 输出信息"
+echo "输入 0 退出脚本"
+read -p "输入选项: " choice
+
+case $choice in
+     1) install_snell ;;
+     2) uninstall_snell ;;
+     3) restart_snell ;;
+     4) view_snell_status ;;
+     5) view_snell_logs ;;
+     0) exit ;;
+     *) echo "无效的选项" ;;
+esac
