@@ -163,10 +163,6 @@ echo "5. 查看 Snell 输出信息"
 echo "输入 0 退出脚本"
 echo ""
 
-# 显示 Snell 安装状态和运行状态
-check_install_status
-check_running_status
-
 # 读取用户输入
 read -p "输入选项: " choice
 
@@ -179,3 +175,7 @@ case $choice in
      0) exit ;;
      *) echo "无效的选项" ;;
 esac
+
+# 显示 Snell 安装状态和运行状态
+check_install_status
+check_running_status
