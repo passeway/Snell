@@ -170,12 +170,8 @@ case $choice in
      1) install_snell ;;
      2) uninstall_snell ;;
      3) restart_snell ;;
-     4) view_snell_status ;;
-     5) view_snell_logs ;;
+     4) check_install_status && check_running_status ;;
+     5) cat /etc/snell_output.txt ;;
      0) exit ;;
      *) echo "无效的选项" ;;
 esac
-
-# 显示 Snell 安装状态和运行状态
-check_install_status
-check_running_status
