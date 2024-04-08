@@ -9,6 +9,9 @@
 ```bash
 wget -q https://raw.githubusercontent.com/passeway/Snell/main/Snell.sh -O Snell.sh && chmod +x Snell.sh && ./Snell.sh
 ```
+```
+curl -sS https://raw.githubusercontent.com/passeway/Snell/main/Snell.sh -o Snell.sh && chmod +x Snell.sh && ./Snell.sh
+```
 
 
 ## 详细说明
