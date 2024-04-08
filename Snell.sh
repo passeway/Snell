@@ -52,7 +52,7 @@ install_snell() {
     mkdir -p $CONF_DIR
 
     # 生成配置文件
-    snell-server --wizard -c $CONF_FILE
+    snell-server --wizard -c $CONF_FILE -y
 
     # 获取配置中的端口和密码
     RANDOM_PORT=$(grep -oP '(?<=listen = ::0:)\d+' $CONF_FILE)
