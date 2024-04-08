@@ -54,7 +54,15 @@ install_snell() {
     # 生成配置文件
     snell-server --wizard -c $CONF_FILE -y
 
+    # 确认配置文件是否存在
+    if [ ! -f "$CONF_FILE" ]; then
+        echo "配置文件不存在."
+        exit 1
+    fi
 
+    # 获取配置中的端口和密码
+    RANDOM_PORT=$(grep -oP '(?<=listen = ::0:)\d+' $CONF_FILE)
+    RANDOM_PSK=$(grep -oP '(?<=psk = )\S+' $CONF_FILE)
 
     # 创建 Systemd 服务文件
     cat > $SYSTEMD_SERVICE_FILE << EOF
@@ -100,9 +108,6 @@ EOF
 
     # 获取本机IP地址
     HOST_IP=$(curl -s http://checkip.amazonaws.com)
-    # 获取配置中的端口和密码
-    RANDOM_PORT=$(grep -oP '(?<=listen = ::0:)\d+' $CONF_FILE)
-    RANDOM_PSK=$(grep -oP '(?<=psk = )\S+' $CONF_FILE)
 
     # 输出所需信息，包含IP所在国家、生成的端口和密码
     echo "Snell 安装成功."
