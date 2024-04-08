@@ -11,7 +11,7 @@ install_snell() {
     apt-get update && apt-get -y upgrade
 
     # 安装必要的软件包
-    apt-get install -y unzip wget curl
+    apt-get install -y unzip wget curl expect
 
     # 下载 Snell 服务器文件
     SNELL_VERSION="v4.0.1"
@@ -51,8 +51,16 @@ install_snell() {
     # 创建配置文件目录
     mkdir -p $CONF_DIR
 
-    # 生成配置文件
-    snell-server --wizard -c $CONF_FILE -y
+    # 使用 expect 自动化生成配置文件
+    expect << EOF
+spawn $INSTALL_DIR/snell-server --wizard -c $CONF_FILE
+expect "Create new? \[Y/n\]" { send "Y\r" }
+expect "Listening address:" { send "\r" }
+expect "Listening port:" { send "\r" }
+expect "PSK:" { send "\r" }
+expect "Use IPv6?" { send "n\r" }
+expect eof
+EOF
 
     # 确认配置文件是否存在
     if [ ! -f "$CONF_FILE" ]; then
