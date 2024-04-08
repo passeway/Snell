@@ -64,6 +64,15 @@ EOF
 
     # 输出所需信息
     echo "Snell安装完成，端口号: $RANDOM_PORT, PSK: $RANDOM_PSK"
+
+    # 获取本机IP地址
+    HOST_IP=$(curl -s http://checkip.amazonaws.com)
+
+    # 获取IP所在国家
+    IP_COUNTRY=$(curl -s http://ipinfo.io/$HOST_IP/country)
+
+    # 输出配置信息
+    echo "$IP_COUNTRY = snell, $HOST_IP, $RANDOM_PORT, psk = $RANDOM_PSK, version = 4, reuse = true, tfo = true"
 }
 
 # 函数定义：输出 Snell 配置信息
