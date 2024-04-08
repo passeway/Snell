@@ -126,7 +126,7 @@ EOF
 
     # 输出所需信息，包含IP所在国家
     echo "Snell 安装成功."
-    echo "$IP_COUNTRY = snell, $HOST_IP, $RANDOM_PORT, psk = $RANDOM_PSK, version = 4, reuse = true, tfo = true"
+    echo "$IP_COUNTRY = snell, $HOST_IP, $RANDOM_PORT, psk = $RANDOM_PSK, version = 4, reuse = true, tfo = true" > /etc/snell_output.txt
 }
 
 uninstall_snell() {
@@ -182,23 +182,27 @@ view_snell_status() {
 view_snell_logs() {
     # 查看 Snell 输出信息
     echo "Snell 安装成功后输出的信息:"
-    journalctl -u snell | grep "Snell 安装成功"
+    cat /etc/snell_output.txt
 }
 
 # 显示菜单选项
-echo "选择操作:"
-echo "1. 安装 Snell"
-echo "2. 卸载 Snell"
-echo "3. 重启 Snell"
-echo "4. 查看 Snell 服务状态"
-echo "5. 查看 Snell 输出信息"
-read -p "输入选项: " choice
+while true; do
+    echo "选择操作:"
+    echo "1. 安装 Snell"
+    echo "2. 卸载 Snell"
+    echo "3. 重启 Snell"
+    echo "4. 查看 Snell 服务状态"
+    echo "5. 查看 Snell 输出信息"
+    echo "0. 退出 Snell 服务脚本"
+    read -p "输入选项: " choice
 
-case $choice in
-    1) install_snell ;;
-    2) uninstall_snell ;;
-    3) restart_snell ;;
-    4) view_snell_status ;;
-    5) view_snell_logs ;;
-    *) echo "无效的选项" ;;
-esac
+    case $choice in
+         1) install_snell ;;
+         2) uninstall_snell ;;
+         3) restart_snell ;;
+         4) view_snell_status ;;
+         5) view_snell_logs ;;
+         0) exit ;;
+         *) echo "无效的选项" ;;
+    esac
+done
