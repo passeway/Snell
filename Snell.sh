@@ -10,11 +10,11 @@ install_snell() {
 
     # 判断并卸载不同版本的 Docker Compose
     if [ -f "/usr/local/bin/docker-compose" ]; then
-        sudo rm /usr/local/bin/docker-compose
+    sudo rm /usr/local/bin/docker-compose
     fi
 
     if [ -d "$HOME/.docker/cli-plugins/" ]; then
-        rm -rf $HOME/.docker/cli-plugins/
+    rm -rf $HOME/.docker/cli-plugins/
     fi
 
     # 安装 Docker Compose 插件
@@ -34,7 +34,7 @@ install_snell() {
     fi
 
     # 创建 docker-compose.yml
-    cat > /root/snelldocker/docker-compose.yml << EOF
+cat > /root/snelldocker/docker-compose.yml << EOF
 version: "3.8"
 services:
   snell:
@@ -49,7 +49,7 @@ services:
 EOF
 
     # 创建 snell.conf 配置文件
-    cat > /root/snelldocker/snell-conf/snell.conf << EOF
+cat > /root/snelldocker/snell-conf/snell.conf << EOF
 [snell-server]
 listen = ::0:$RANDOM_PORT
 psk = $RANDOM_PSK
