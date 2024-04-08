@@ -193,7 +193,7 @@ while true; do
     echo "3. 重启 Snell"
     echo "4. 查看 Snell 服务状态"
     echo "5. 查看 Snell 输出信息"
-    echo "0. 退出 Snell 服务脚本"
+    echo "输入 0 退出脚本"
     read -p "输入选项: " choice
 
     case $choice in
