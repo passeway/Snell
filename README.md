@@ -1,4 +1,4 @@
-# Snell 自动部署脚本
+# Snell 
 
 这个 Bash 脚本可以帮助你快速部署 Snell 代理服务器。
 
