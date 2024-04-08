@@ -1,6 +1,15 @@
+## 预览
+
+![preview](预览.png)
+
 # Snell 
 
 这个 Bash 脚本可以帮助你快速部署 Snell 代理服务器。
+## 一键脚本
+```bash
+wget -q https://raw.githubusercontent.com/passeway/Snell/main/Snell.sh -O Snell.sh && chmod +x Snell.sh && ./Snell.sh
+```
+
 
 ## 详细说明
 
