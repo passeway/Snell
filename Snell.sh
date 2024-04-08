@@ -52,7 +52,7 @@ install_snell() {
     mkdir -p $CONF_DIR
 
     # 生成随机端口和密码
-    snell-server --wizard -c $CONF_FILE
+    snell-server --wizard -c $CONF_FILE -y
 
     # 创建 Systemd 服务文件
     cat > $SYSTEMD_SERVICE_FILE << EOF
@@ -99,12 +99,9 @@ EOF
     # 获取本机IP地址
     HOST_IP=$(curl -s http://checkip.amazonaws.com)
 
-    # 获取IP所在国家
-    IP_COUNTRY=$(curl -s http://ipinfo.io/$HOST_IP/country)
-
-    # 输出所需信息，包含IP所在国家
+    # 输出所需信息，包含IP所在国家、生成的端口和密码
     echo "Snell 安装成功."
-    echo "$IP_COUNTRY = snell, $HOST_IP, $RANDOM_PORT, psk = $RANDOM_PSK, version = 4, reuse = true, tfo = true"
+    echo "SG = snell, $HOST_IP, $RANDOM_PORT, psk = $RANDOM_PSK, version = 4, reuse = true, tfo = true"
 }
 
 uninstall_snell() {
