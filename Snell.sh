@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# 提示用户需要 root 权限运行脚本
+# 检查是否具有 root 权限
 if [ "$(id -u)" != "0" ]; then
     echo "请以 root 权限运行此脚本."
     exit 1
@@ -48,20 +48,11 @@ install_snell() {
     # 赋予执行权限
     chmod +x $INSTALL_DIR/snell-server
 
-    # 生成随机端口和密码
-    RANDOM_PORT=$(shuf -i 30000-65000 -n 1)
-    RANDOM_PSK=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 20)
-
     # 创建配置文件目录
     mkdir -p $CONF_DIR
 
-    # 创建配置文件
-    cat > $CONF_FILE << EOF
-[snell-server]
-listen = ::0:$RANDOM_PORT
-psk = $RANDOM_PSK
-ipv6 = false
-EOF
+    # 生成随机端口和密码
+    snell-server --wizard -c $CONF_FILE
 
     # 创建 Systemd 服务文件
     cat > $SYSTEMD_SERVICE_FILE << EOF
@@ -85,21 +76,21 @@ WantedBy=multi-user.target
 EOF
 
     # 重载 Systemd 配置
-    sudo systemctl daemon-reload
+    systemctl daemon-reload
     if [ $? -ne 0 ]; then
         echo "重载 Systemd 配置失败."
         exit 1
     fi
 
     # 开机自启动 Snell
-    sudo systemctl enable snell
+    systemctl enable snell
     if [ $? -ne 0 ]; then
         echo "开机自启动 Snell 失败."
         exit 1
     fi
 
     # 启动 Snell 服务
-    sudo systemctl start snell
+    systemctl start snell
     if [ $? -ne 0 ]; then
         echo "启动 Snell 服务失败."
         exit 1
@@ -118,29 +109,29 @@ EOF
 
 uninstall_snell() {
     # 停止 Snell 服务
-    sudo systemctl stop snell
+    systemctl stop snell
     if [ $? -ne 0 ]; then
         echo "停止 Snell 服务失败."
         exit 1
     fi
 
     # 禁用开机自启动
-    sudo systemctl disable snell
+    systemctl disable snell
     if [ $? -ne 0 ]; then
         echo "禁用开机自启动失败."
         exit 1
     fi
 
     # 删除 Systemd 服务文件
-    sudo rm /lib/systemd/system/snell.service
+    rm /lib/systemd/system/snell.service
     if [ $? -ne 0 ]; then
         echo "删除 Systemd 服务文件失败."
         exit 1
     fi
 
     # 删除安装的文件和目录
-    sudo rm /usr/local/bin/snell-server
-    sudo rm -rf /etc/snell
+    rm /usr/local/bin/snell-server
+    rm -rf /etc/snell
 
     echo "Snell 卸载成功."
 }
