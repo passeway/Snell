@@ -133,7 +133,7 @@ uninstall_snell() {
 # 询问用户要执行的操作
 echo "请选择要执行的操作："
 echo "1. 安装 Snell"
-echo "2. 输出 Snell 配置信息"
+echo "2. 输出 Snell "
 echo "3. 卸载 Snell"
 read -p "请输入选项 (1、2 或 3): " option
 
