@@ -129,7 +129,7 @@ EOF
     # 输出所需信息，包含IP所在国家
     echo "Snell 安装成功."
     echo "服务配置信息:"
-    echo "$IP_COUNTRY = snell, $HOST_IP, $RANDOM_PORT, psk = $RANDOM_PSK, version = 4, reuse = true, tfo = true"
+    echo "$IP_COUNTRY = snell, $HOST_IP, $RANDOM_PORT, psk = $RANDOM_PSK, version = 4, reuse = true, tfo = true" > /etc/snell_output.txt
 }
 
 check_install_status() {
@@ -166,9 +166,6 @@ uninstall_snell() {
 echo "=============================="
 echo "Snell Server 管理脚本"
 echo "=============================="
-
-# 安装 Snell
-install_snell
 
 # 显示菜单选项
 echo "选择操作:"
