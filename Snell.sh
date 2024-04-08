@@ -171,12 +171,18 @@ restart_snell() {
 
 view_snell_status() {
     # 查看 Snell 服务状态
-    sudo systemctl status snell
+    sudo systemctl status snell | grep "Active: active" > /dev/null
+    if [ $? -eq 0 ]; then
+        echo "Snell 服务正在运行."
+    else
+        echo "Snell 服务未在运行."
+    fi
 }
 
 view_snell_logs() {
     # 查看 Snell 输出信息
-    journalctl -u snell
+    echo "Snell 安装成功后输出的信息:"
+    journalctl -u snell | grep "Snell 安装成功"
 }
 
 # 显示菜单选项
