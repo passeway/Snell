@@ -51,8 +51,12 @@ install_snell() {
     # 创建配置文件目录
     mkdir -p $CONF_DIR
 
-    # 生成随机端口和密码
-    snell-server --wizard -c $CONF_FILE -y
+    # 生成配置文件
+    snell-server --wizard -c $CONF_FILE
+
+    # 获取配置中的端口和密码
+    RANDOM_PORT=$(grep -oP '(?<=listen = ::0:)\d+' $CONF_FILE)
+    RANDOM_PSK=$(grep -oP '(?<=psk = )\S+' $CONF_FILE)
 
     # 创建 Systemd 服务文件
     cat > $SYSTEMD_SERVICE_FILE << EOF
