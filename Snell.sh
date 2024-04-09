@@ -60,7 +60,7 @@ install_snell() {
 [snell-server]
 listen = ::0:$RANDOM_PORT
 psk = $RANDOM_PSK
-ipv6 = false
+ipv6 = true
 EOF
 
     # 创建 Systemd 服务文件
