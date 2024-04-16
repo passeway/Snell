@@ -154,7 +154,7 @@ uninstall_snell() {
 echo "选择操作:"
 echo "1. 安装 Snell"
 echo "2. 卸载 Snell"
-read -p "输入选项: " choice
+read -p "请输入选项编号: " choice
 
 case $choice in
     1) install_snell ;;
