@@ -1,5 +1,13 @@
 #!/bin/bash
 
+# 等待其他 apt 进程完成
+wait_for_apt() {
+    while fuser /var/lib/dpkg/lock >/dev/null 2>&1 ; do
+        echo "等待其他 apt 进程完成..."
+        sleep 1
+    done
+}
+
 # 提示用户需要 root 权限运行脚本
 if [ "$(id -u)" != "0" ]; then
     echo "请以 root 权限运行此脚本."
@@ -7,6 +15,9 @@ if [ "$(id -u)" != "0" ]; then
 fi
 
 install_snell() {
+    # 调用等待其他 apt 进程完成函数
+    wait_for_apt
+
     # 判断系统及定义系统安装依赖方式
     REGEX=("debian" "ubuntu" "centos|red hat|kernel|oracle linux|alma|rocky" "'amazon linux'" "fedora")
     RELEASE=("Debian" "Ubuntu" "CentOS" "CentOS" "Fedora")
