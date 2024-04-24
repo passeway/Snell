@@ -27,7 +27,7 @@ install_snell() {
     PACKAGE_UNINSTALL=("apt -y autoremove" "apt -y autoremove" "yum -y autoremove" "yum -y autoremove" "yum -y autoremove")
 
     # 安装必要的软件包
-    apt-get install -y unzip wget curl
+    apt update && sudo apt install -y wget unzip
 
     # 下载 Snell 服务器文件
     SNELL_VERSION="v4.0.1"
