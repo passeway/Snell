@@ -128,7 +128,7 @@ EOF
     IP_COUNTRY=$(curl -s http://ipinfo.io/$HOST_IP/country)
 
     # 输出所需信息，包含IP所在国家
-    echo "Snell 安装成功并启动"
+    echo "Snell 安装成功"
     echo "$IP_COUNTRY = snell, $HOST_IP, $RANDOM_PORT, psk = $RANDOM_PSK, version = 4, reuse = true, tfo = true"
 }
 
