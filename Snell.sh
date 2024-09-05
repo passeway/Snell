@@ -12,7 +12,7 @@ RESET='\033[0m'
 # 等待其他 apt 进程完成
 wait_for_apt() {
     while fuser /var/lib/dpkg/lock >/dev/null 2>&1; do
-        echo -e "${YELLOW}等待其他 apt 进程完成...${RESET}"
+        echo -e "${YELLOW}等待其他 apt 进程完成${RESET}"
         sleep 1
     done
 }
@@ -45,7 +45,6 @@ install_snell() {
     apt update && apt install -y wget unzip
 
     # 下载 Snell 服务器文件
-    SNELL_VERSION="v4.0.1"
     ARCH=$(arch)
     SNELL_URL=""
     INSTALL_DIR="/usr/local/bin"
@@ -54,9 +53,9 @@ install_snell() {
     CONF_FILE="${CONF_DIR}/snell-server.conf"
 
     if [[ ${ARCH} == "aarch64" ]]; then
-        SNELL_URL="https://dl.nssurge.com/snell/snell-server-${SNELL_VERSION}-linux-aarch64.zip"
+        SNELL_URL="https://dl.nssurge.com/snell/snell-server-v4.1.0-linux-aarch64.zip"
     else
-        SNELL_URL="https://dl.nssurge.com/snell/snell-server-${SNELL_VERSION}-linux-amd64.zip"
+        SNELL_URL="https://dl.nssurge.com/snell/snell-server-v4.1.0-linux-amd64.zip"
     fi
 
     # 下载 Snell 服务器文件
@@ -89,6 +88,7 @@ install_snell() {
     # 创建配置文件
     cat > ${CONF_FILE} << EOF
 [snell-server]
+dns = 1.1.1.1, 8.8.8.8, 2001:4860:4860::8888
 listen = ::0:${RANDOM_PORT}
 psk = ${RANDOM_PSK}
 ipv6 = true
