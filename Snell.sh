@@ -262,6 +262,7 @@ show_menu() {
             echo "3. 启动 Snell"
         fi
     fi
+    echo "4. 查看 Snell"
     echo "0. 退出"
     echo -e "${GREEN}======================${RESET}"
     read -p "请输入选项编号: " choice
@@ -299,6 +300,13 @@ main() {
                 else
                     echo -e "${RED}Snell 尚未安装${RESET}"
                     echo "$(date '+%Y-%m-%d %H:%M:%S') - 尝试管理服务但 Snell 尚未安装" >> "$LOG_FILE"
+                fi
+                ;;
+            4)
+                if [[ -n "${IP_COUNTRY}" && -n "${HOST_IP}" && -n "${RANDOM_PORT}" && -n "${RANDOM_PSK}" ]]; then
+                    echo "${IP_COUNTRY} = snell, ${HOST_IP}, ${RANDOM_PORT}, psk = ${RANDOM_PSK}, version = 4, reuse = true, tfo = true"
+                else
+                    echo -e "${RED}Snell 未安装或配置信息不可用${RESET}"
                 fi
                 ;;
             0)
