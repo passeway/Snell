@@ -15,6 +15,13 @@ LOG_FILE="/var/log/snell_manager.log"
 # 服务名称
 SERVICE_NAME="snell.service"
 
+
+# 配置信息变量
+IP_COUNTRY=""
+HOST_IP=""
+RANDOM_PORT=""
+RANDOM_PSK=""
+
 # 等待其他 apt 进程完成
 wait_for_apt() {
     while fuser /var/lib/dpkg/lock >/dev/null 2>&1 || fuser /var/lib/apt/lists/lock >/dev/null 2>&1 || fuser /var/cache/apt/archives/lock >/dev/null 2>&1; do
