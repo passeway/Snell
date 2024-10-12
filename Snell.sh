@@ -208,4 +208,13 @@ EOF
 
     echo -e "${GREEN}Snell 安装成功${RESET}"
     echo "${IP_COUNTRY} = snell, ${HOST_IP}, ${RANDOM_PORT}, psk = ${RANDOM_PSK}, version = 4, reuse = true, tfo = true"
-    echo "$(date '+%Y-%m-%d %H:%M:%S') - Snell 安装成功: ${IP_COUNTRY}, ${HOST_IP}, ${RANDOM_PORT}, psk=${RANDOM
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - Snell 安装成功: ${IP_COUNTRY}, ${HOST_IP}, ${RANDOM_PORT}, psk=${RANDOM_PSK}" >> "$LOG_FILE"
+}
+
+# 主程序
+check_root
+if ! check_snell_installed; then
+    install_snell
+else
+    echo -e "${YELLOW}Snell 已安装，您可以使用其他功能${RESET}"
+fi
