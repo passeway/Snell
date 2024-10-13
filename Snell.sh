@@ -217,6 +217,9 @@ EOF
 
 
 
+
+
+
 # 卸载 Snell
 uninstall_snell() {
     echo -e "${CYAN}正在卸载 Snell${RESET}"
@@ -280,16 +283,16 @@ show_menu() {
     echo -e "安装状态: ${installation_status}"
     echo -e "运行状态: ${running_status}"
     echo ""
-    echo "1. 安装 Snell"
-    echo "2. 卸载 Snell"
+    echo "1. 安装 Snell 服务"
+    echo "2. 卸载 Snell 服务"
     if [ $snell_installed -eq 0 ]; then
         if [ $snell_running -eq 0 ]; then
-            echo "3. 停止 Snell"
+            echo "3. 停止 Snell 服务"
         else
-            echo "3. 启动 Snell"
+            echo "3. 启动 Snell 服务"
         fi
     fi
-    echo "4. 查看 Snell"
+    echo "4. 查看 Snell 配置"
     echo "0. 退出"
     echo -e "${GREEN}======================${RESET}"
     read -p "请输入选项编号: " choice
