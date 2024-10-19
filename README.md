@@ -6,7 +6,7 @@
 ## 一键脚本
 
 ```
-bash <(curl -fsSL https://raw.githubusercontent.com/passeway/Snell/main/Snell.sh)
+bash <(curl -fsSL snell.vercel.app)
 ```
 
 ## 详细说明
