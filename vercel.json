@@ -1,0 +1,9 @@
+{
+  "redirects": [
+    {
+      "source": "/",
+      "destination": "https://raw.githubusercontent.com/passeway/sing-box/refs/heads/main/sing-box.sh",
+      "permanent": true
+    }
+  ]
+}
