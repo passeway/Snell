@@ -1,6 +1,6 @@
 ## 终端预览
 
-![preview](预览.png)
+![preview](image.png)
 
 
 ## 一键脚本
