@@ -210,12 +210,23 @@ EOF
     cat /etc/snell/config.txt
 }
 
-# 更新 Snell
 update_snell() {
-    echo -e "${CYAN}正在更新 Snell${RESET}"
+    # 检查 Snell 是否已安装
+    INSTALL_DIR="/usr/local/bin"
+    SNELL_BIN="${INSTALL_DIR}/snell-server"
+    if [ ! -f "${SNELL_BIN}" ]; then
+        echo -e "${YELLOW}Snell 未安装，跳过更新${RESET}"
+        return
+    fi
 
-    #停止 snell
-    systemctl stop snell
+    echo -e "${GREEN}Snell 正在更新${RESET}"
+
+    # 停止 Snell
+    if ! systemctl stop snell; then
+        echo -e "${RED}停止 Snell 失败。${RESET}"
+        echo "$(date '+%Y-%m-%d %H:%M:%S') - 停止 Snell 失败" >> "$LOG_FILE"
+        exit 1
+    fi
 
     # 等待其他 apt 进程完成
     wait_for_apt
@@ -237,7 +248,6 @@ update_snell() {
     # 下载 Snell 服务器文件
     ARCH=$(arch)
     SNELL_URL=""
-    INSTALL_DIR="/usr/local/bin"
     SYSTEMD_SERVICE_FILE="/lib/systemd/system/snell.service"
     CONF_DIR="/etc/snell"
     CONF_FILE="${CONF_DIR}/snell-server.conf"
@@ -249,16 +259,14 @@ update_snell() {
     fi
 
     # 下载 Snell 服务器文件
-    wget ${SNELL_URL} -O snell-server.zip
-    if [ $? -ne 0 ]; then
+    if ! wget ${SNELL_URL} -O snell-server.zip; then
         echo -e "${RED}下载 Snell 失败。${RESET}"
         echo "$(date '+%Y-%m-%d %H:%M:%S') - 下载 Snell 失败" >> "$LOG_FILE"
         exit 1
     fi
 
     # 解压缩文件到指定目录
-    unzip -o snell-server.zip -d ${INSTALL_DIR}
-    if [ $? -ne 0 ]; then
+    if ! unzip -o snell-server.zip -d ${INSTALL_DIR}; then
         echo -e "${RED}解压缩 Snell 失败。${RESET}"
         echo "$(date '+%Y-%m-%d %H:%M:%S') - 解压缩 Snell 失败" >> "$LOG_FILE"
         exit 1
@@ -268,11 +276,18 @@ update_snell() {
     rm snell-server.zip
 
     # 赋予执行权限
-    chmod +x ${INSTALL_DIR}/snell-server
-    # 重启 snell
-    systemctl restart snell
+    chmod +x ${SNELL_BIN}
+
+    # 重启 Snell
+    if ! systemctl restart snell; then
+        echo -e "${RED}重启 Snell 失败。${RESET}"
+        echo "$(date '+%Y-%m-%d %H:%M:%S') - 重启 Snell 失败" >> "$LOG_FILE"
+        exit 1
+    fi
+
     echo -e "${GREEN}Snell 更新成功${RESET}"
 }
+
 
 
 # 卸载 Snell
