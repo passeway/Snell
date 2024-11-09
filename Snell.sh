@@ -210,8 +210,10 @@ EOF
     IP_COUNTRY=$(curl -s http://ipinfo.io/${HOST_IP}/country)
 
     echo -e "${GREEN}Snell 安装成功${RESET}"
+    cat << EOF > ${CONF_FILE}/config.txt
     echo "${IP_COUNTRY} = snell, ${HOST_IP}, ${RANDOM_PORT}, psk = ${RANDOM_PSK}, version = 4, reuse = true"
-    echo "$(date '+%Y-%m-%d %H:%M:%S') - Snell 安装成功: ${IP_COUNTRY}, ${HOST_IP}, ${RANDOM_PORT}, psk=${RANDOM_PSK}" >> "$LOG_FILE"
+EOF
+    cat ${CONF_FILE}/config.txt
 }
 
 
@@ -332,11 +334,7 @@ main() {
                 fi
                 ;;
             4)
-                if [[ -n "${IP_COUNTRY}" && -n "${HOST_IP}" && -n "${RANDOM_PORT}" && -n "${RANDOM_PSK}" ]]; then
-                    echo "${IP_COUNTRY} = snell, ${HOST_IP}, ${RANDOM_PORT}, psk = ${RANDOM_PSK}, version = 4, reuse = true"
-                else
-                    echo -e "${RED}Snell 未安装或配置信息不可用${RESET}"
-                fi
+                cat ${CONF_FILE}/config.txt
                 ;;
             0)
                 echo -e "${GREEN}已退出 Snell 管理工具${RESET}"
