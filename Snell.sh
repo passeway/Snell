@@ -212,7 +212,10 @@ EOF
 
 # 更新 Snell
 update_snell() {
-    echo -e "${CYAN}正在安装 Snell${RESET}"
+    echo -e "${CYAN}正在更新 Snell${RESET}"
+
+    #停止 snell
+    systemctl stop snell
 
     # 等待其他 apt 进程完成
     wait_for_apt
