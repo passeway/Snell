@@ -15,12 +15,6 @@ LOG_FILE="/var/log/snell_manager.log"
 # 服务名称
 SERVICE_NAME="snell.service"
 
-# 配置信息变量
-IP_COUNTRY=""
-HOST_IP=""
-RANDOM_PORT=""
-RANDOM_PSK=""
-
 # 等待其他 apt 进程完成
 wait_for_apt() {
     while fuser /var/lib/dpkg/lock >/dev/null 2>&1 || fuser /var/lib/apt/lists/lock >/dev/null 2>&1 || fuser /var/cache/apt/archives/lock >/dev/null 2>&1; do
@@ -211,14 +205,69 @@ EOF
 
     echo -e "${GREEN}Snell 安装成功${RESET}"
     cat << EOF > /etc/snell/config.txt
-"${IP_COUNTRY} = snell, ${HOST_IP}, ${RANDOM_PORT}, psk = ${RANDOM_PSK}, version = 4, reuse = true"
+${IP_COUNTRY} = snell, ${HOST_IP}, ${RANDOM_PORT}, psk = ${RANDOM_PSK}, version = 4, reuse = true
 EOF
     cat /etc/snell/config.txt
 }
 
+# 更新 Snell
+update_snell() {
+    echo -e "${CYAN}正在安装 Snell${RESET}"
 
+    # 等待其他 apt 进程完成
+    wait_for_apt
 
+    # 更新软件包列表
+    if ! apt update; then
+        echo -e "${RED}更新软件包列表失败，请检查您的网络连接或软件源配置。${RESET}"
+        echo "$(date '+%Y-%m-%d %H:%M:%S') - 更新软件包列表失败" >> "$LOG_FILE"
+        exit 1
+    fi
 
+    # 安装必要的软件包
+    if ! apt install -y wget unzip curl; then
+        echo -e "${RED}安装必要软件包失败，请检查您的网络连接。${RESET}"
+        echo "$(date '+%Y-%m-%d %H:%M:%S') - 安装必要软件包失败" >> "$LOG_FILE"
+        exit 1
+    fi
+
+    # 下载 Snell 服务器文件
+    ARCH=$(arch)
+    SNELL_URL=""
+    INSTALL_DIR="/usr/local/bin"
+    SYSTEMD_SERVICE_FILE="/lib/systemd/system/snell.service"
+    CONF_DIR="/etc/snell"
+    CONF_FILE="${CONF_DIR}/snell-server.conf"
+
+    if [[ ${ARCH} == "aarch64" ]]; then
+        SNELL_URL="https://dl.nssurge.com/snell/snell-server-v4.1.1-linux-aarch64.zip"
+    else
+        SNELL_URL="https://dl.nssurge.com/snell/snell-server-v4.1.1-linux-amd64.zip"
+    fi
+
+    # 下载 Snell 服务器文件
+    wget ${SNELL_URL} -O snell-server.zip
+    if [ $? -ne 0 ]; then
+        echo -e "${RED}下载 Snell 失败。${RESET}"
+        echo "$(date '+%Y-%m-%d %H:%M:%S') - 下载 Snell 失败" >> "$LOG_FILE"
+        exit 1
+    fi
+
+    # 解压缩文件到指定目录
+    unzip -o snell-server.zip -d ${INSTALL_DIR}
+    if [ $? -ne 0 ]; then
+        echo -e "${RED}解压缩 Snell 失败。${RESET}"
+        echo "$(date '+%Y-%m-%d %H:%M:%S') - 解压缩 Snell 失败" >> "$LOG_FILE"
+        exit 1
+    fi
+
+    # 删除下载的 zip 文件
+    rm snell-server.zip
+
+    # 赋予执行权限
+    chmod +x ${INSTALL_DIR}/snell-server
+    echo -e "${GREEN}Snell 更新成功${RESET}"
+}
 
 
 # 卸载 Snell
@@ -334,6 +383,9 @@ main() {
                 fi
                 ;;
             4)
+                update_snell
+                ;;
+            5)
                 cat /etc/snell/config.txt
                 ;;
             0)
