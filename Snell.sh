@@ -211,7 +211,7 @@ EOF
 
     echo -e "${GREEN}Snell 安装成功${RESET}"
     cat << EOF > /etc/snell/config.txt
-    echo "${IP_COUNTRY} = snell, ${HOST_IP}, ${RANDOM_PORT}, psk = ${RANDOM_PSK}, version = 4, reuse = true"
+"${IP_COUNTRY} = snell, ${HOST_IP}, ${RANDOM_PORT}, psk = ${RANDOM_PSK}, version = 4, reuse = true"
 EOF
     cat /etc/snell/config.txt
 }
