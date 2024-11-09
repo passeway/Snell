@@ -266,6 +266,8 @@ update_snell() {
 
     # 赋予执行权限
     chmod +x ${INSTALL_DIR}/snell-server
+    # 重启 snell
+    systemctl restart snell
     echo -e "${GREEN}Snell 更新成功${RESET}"
 }
 
