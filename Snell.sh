@@ -48,7 +48,6 @@ check_snell_running() {
 
 # 启动 Snell 服务
 start_snell() {
-    echo -e "${CYAN}正在启动 Snell${RESET}"
     systemctl start "$SERVICE_NAME"
     if [ $? -eq 0 ]; then
         echo -e "${GREEN}Snell 启动成功${RESET}"
@@ -61,7 +60,6 @@ start_snell() {
 
 # 停止 Snell 服务
 stop_snell() {
-    echo -e "${CYAN}正在停止 Snell${RESET}"
     systemctl stop "$SERVICE_NAME"
     if [ $? -eq 0 ]; then
         echo -e "${GREEN}Snell 停止成功${RESET}"
