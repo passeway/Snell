@@ -344,7 +344,8 @@ show_menu() {
             echo "3. 启动 Snell 服务"
         fi
     fi
-    echo "4. 查看 Snell 配置"
+    echo "4. 更新 Snell 服务"
+    echo "5. 查看 Snell 配置"
     echo "0. 退出"
     echo -e "${GREEN}======================${RESET}"
     read -p "请输入选项编号: " choice
