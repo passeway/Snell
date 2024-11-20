@@ -17,6 +17,6 @@ bash <(curl -fsSL snell-ten.vercel.app)
 
 - 执行完脚本后，你会得到服务器的 IP 地址、端口号、PSK 等相关信息
 
-## 项目地址：https://github.com/cloudreve/Cloudreve
+## 项目地址：https://surge.mitsea.com/others/snell-server
 
 
