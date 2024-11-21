@@ -93,6 +93,7 @@ install_snell() {
 
     # 下载 Snell 服务器文件
     ARCH=$(arch)
+    VERSION="v4.1.1"
     SNELL_URL=""
     INSTALL_DIR="/usr/local/bin"
     SYSTEMD_SERVICE_FILE="/lib/systemd/system/snell.service"
@@ -100,9 +101,9 @@ install_snell() {
     CONF_FILE="${CONF_DIR}/snell-server.conf"
 
     if [[ ${ARCH} == "aarch64" ]]; then
-        SNELL_URL="https://dl.nssurge.com/snell/snell-server-v4.1.1-linux-aarch64.zip"
+        SNELL_URL="https://dl.nssurge.com/snell/snell-server-${VERSION}-linux-aarch64.zip"
     else
-        SNELL_URL="https://dl.nssurge.com/snell/snell-server-v4.1.1-linux-amd64.zip"
+        SNELL_URL="https://dl.nssurge.com/snell/snell-server-${VERSION}-linux-amd64.zip"
     fi
 
     # 下载 Snell 服务器文件
@@ -245,15 +246,16 @@ update_snell() {
 
     # 下载 Snell 服务器文件
     ARCH=$(arch)
+    VERSION="v4.1.1"
     SNELL_URL=""
     SYSTEMD_SERVICE_FILE="/lib/systemd/system/snell.service"
     CONF_DIR="/etc/snell"
     CONF_FILE="${CONF_DIR}/snell-server.conf"
 
     if [[ ${ARCH} == "aarch64" ]]; then
-        SNELL_URL="https://dl.nssurge.com/snell/snell-server-v4.1.1-linux-aarch64.zip"
+        SNELL_URL="https://dl.nssurge.com/snell/snell-server-${VERSION}-linux-aarch64.zip"
     else
-        SNELL_URL="https://dl.nssurge.com/snell/snell-server-v4.1.1-linux-amd64.zip"
+        SNELL_URL="https://dl.nssurge.com/snell/snell-server-${VERSION}-linux-amd64.zip"
     fi
 
     # 下载 Snell 服务器文件
@@ -284,6 +286,7 @@ update_snell() {
     fi
 
     echo -e "${GREEN}Snell 更新成功${RESET}"
+    cat /etc/snell/config.txt
 }
 
 
