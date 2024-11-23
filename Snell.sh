@@ -72,7 +72,7 @@ stop_snell() {
 
 # 安装 Snell
 install_snell() {
-    echo -e "${CYAN}正在安装 Snell${RESET}"
+    echo -e "${GREEN}正在安装 Snell${RESET}"
 
     # 等待其他 apt 进程完成
     wait_for_apt
@@ -196,13 +196,17 @@ EOF
         exit 1
     fi
 
+    # 查看 Snell 日志
+    echo -e "${GREEN}Snell 安装成功${RESET}"
+    sleep 3 && sudo journalctl -u snell.service -n 5 --no-pager
+
     # 获取本机IP地址
     HOST_IP=$(curl -s http://checkip.amazonaws.com)
 
     # 获取IP所在国家
     IP_COUNTRY=$(curl -s http://ipinfo.io/${HOST_IP}/country)
 
-    echo -e "${GREEN}Snell 安装成功${RESET}"
+    echo -e "${GREEN}Snell 示例配置${RESET}"
     cat << EOF > /etc/snell/config.txt
 ${IP_COUNTRY} = snell, ${HOST_IP}, ${RANDOM_PORT}, psk = ${RANDOM_PSK}, version = 4, reuse = true
 EOF
@@ -293,7 +297,7 @@ update_snell() {
 
 # 卸载 Snell
 uninstall_snell() {
-    echo -e "${CYAN}正在卸载 Snell${RESET}"
+    echo -e "${GREEN}正在卸载 Snell${RESET}"
 
     # 停止 Snell 服务
     systemctl stop snell
