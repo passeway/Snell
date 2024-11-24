@@ -16,10 +16,10 @@ apt-get update && apt-get -y upgrade
 
 # 检测是否已安装 Docker
 if command -v docker >/dev/null 2>&1; then
-    echo "Docker 已安装，版本信息如下："
+    echo "Docker 已经安装"
     docker --version
 else
-    echo "Docker 未安装，正在安装 Docker"
+    echo "正在安装 Docker"
     # 安装 Docker
     curl -fsSL https://get.docker.com | bash -s docker
     if [ $? -ne 0 ]; then
