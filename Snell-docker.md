@@ -46,5 +46,6 @@ sudo apt-get autoremove -y && \
 sudo docker system prune -a -f
 ```
 
-
-
+```
+bash <(curl -fsSL https://raw.githubusercontent.com/passeway/Snell/refs/heads/main/Snell-docker.sh)
+```
