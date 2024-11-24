@@ -35,10 +35,9 @@ docker rm id
 ```
 卸载 Snell
 ```
-cd /root/snelldocker && \
-docker compose down && \
-rm -rf /root/snelldocker && \
-cd /root
+sudo docker stop snell
+sudo docker rm snell
+rm -rf /root/snelldocker
 ```
 
 安装 Snell
