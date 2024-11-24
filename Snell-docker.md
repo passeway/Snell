@@ -38,7 +38,7 @@ docker rm id
 cd /root/snelldocker && \
 docker compose down && \
 rm -rf /root/snelldocker && \
-cd
+cd /root
 ```
 卸载Docker
 ```
