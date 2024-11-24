@@ -37,7 +37,8 @@ docker rm id
 ```
 sudo docker stop snell
 sudo docker rm snell
-rm -rf /root/snelldocker
+sudo docker rmi accors/snell
+sudo rm -rf /root/snelldocker
 ```
 
 安装 Snell
