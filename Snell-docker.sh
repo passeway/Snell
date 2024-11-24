@@ -8,8 +8,11 @@ PURPLE='\033[0;35m'
 CYAN='\033[0;36m'
 RESET='\033[0m'
 
+
+
 # 更新系统包和升级
 apt-get update && apt-get -y upgrade
+
 
 # 检测是否已安装 Docker
 if command -v docker >/dev/null 2>&1; then
@@ -35,15 +38,19 @@ if [ -d "$HOME/.docker/cli-plugins/" ]; then
     rm -rf $HOME/.docker/cli-plugins/
 fi
 
+
 # 安装 Docker Compose 插件
 apt-get install docker-compose-plugin -y
+
 
 # 创建所需目录
 mkdir -p /root/snelldocker/snell-conf
 
+
 # 生成随机端口和密码
 RANDOM_PORT=$(shuf -i 30000-65000 -n 1)
 RANDOM_PSK=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 20)
+
 
 # 检测系统架构
 ARCH=$(uname -m)
@@ -68,7 +75,7 @@ services:
     volumes:
       - ./snell-conf/snell.conf:/etc/snell-server.conf
     environment:
-      - SNELL_URL=$ARCH
+      - SNELL_URL=$DOWNLOAD_URL
 EOF
 
 # 创建 snell.conf 配置文件
@@ -91,10 +98,10 @@ HOST_IP=$(curl -s http://checkip.amazonaws.com)
 # 获取IP所在国家
 IP_COUNTRY=$(curl -s http://ipinfo.io/$HOST_IP/country)
 
-# 输出客户端信息
 
+# 输出客户端信息
 echo -e "${GREEN}Snell 示例配置${RESET}"
-cat << EOF > /root/snelldocker/snell.txt
+cat << EOF > /root/snelldocker/snell-conf/snell.txt
 ${IP_COUNTRY} = snell, ${HOST_IP}, ${RANDOM_PORT}, psk = ${RANDOM_PSK}, version = 4, reuse = true
 EOF
-cat /root/snelldocker/snell.txt
+cat /root/snelldocker/snell-conf/snell.txt
