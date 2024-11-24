@@ -21,6 +21,10 @@ docker ps
 ```
 docker ps -a
 ```
+删除容器
+```
+docker rm id
+```
 停止容器
 ```
 docker stop id
@@ -28,10 +32,6 @@ docker stop id
 启动容器
 ```
 docker start id
-```
-删除容器
-```
-docker rm id
 ```
 卸载 Snell
 ```
