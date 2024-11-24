@@ -1,4 +1,12 @@
 #!/bin/bash
+# 定义颜色代码
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+BLUE='\033[0;34m'
+PURPLE='\033[0;35m'
+CYAN='\033[0;36m'
+RESET='\033[0m'
 
 # 更新系统包和升级
 apt-get update && apt-get -y upgrade
@@ -51,7 +59,6 @@ fi
 
 # 创建 docker-compose.yml
 cat > /root/snelldocker/docker-compose.yml << EOF
-version: "3.8"
 services:
   snell:
     image: accors/snell:latest
@@ -69,7 +76,7 @@ cat > /root/snelldocker/snell-conf/snell.conf << EOF
 [snell-server]
 listen = ::0:$RANDOM_PORT
 psk = $RANDOM_PSK
-ipv6 = false
+ipv6 = true
 EOF
 
 # 切换目录
@@ -84,5 +91,10 @@ HOST_IP=$(curl -s http://checkip.amazonaws.com)
 # 获取IP所在国家
 IP_COUNTRY=$(curl -s http://ipinfo.io/$HOST_IP/country)
 
-# 输出所需信息，包含IP所在国家
-echo "$IP_COUNTRY = snell, $HOST_IP, $RANDOM_PORT, psk = $RANDOM_PSK, version = 4, reuse = true, tfo = true"
+# 输出客户端信息
+
+echo -e "${GREEN}Snell 示例配置${RESET}"
+cat << EOF > /root/snelldocker/snell-conf/snell.txt
+${IP_COUNTRY} = snell, ${HOST_IP}, ${RANDOM_PORT}, psk = ${RANDOM_PSK}, version = 4, reuse = true
+EOF
+cat /root/snelldocker/snell-conf/snell.txt
