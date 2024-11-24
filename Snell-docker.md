@@ -42,11 +42,11 @@ cd /root
 ```
 卸载Docker
 ```
-sudo docker stop $(sudo docker ps -aq) && \
-sudo docker rm $(sudo docker ps -aq) && \
-sudo docker rmi $(sudo docker images -q) --force && \
-sudo docker network prune -f && \
-sudo docker volume prune -f && \
+sudo docker stop $(sudo docker ps -aq) 2>/dev/null && \
+sudo docker rm $(sudo docker ps -aq) 2>/dev/null && \
+sudo docker rmi $(sudo docker images -q) --force 2>/dev/null && \
+sudo docker network prune -f 2>/dev/null && \
+sudo docker volume prune -f 2>/dev/null && \
 sudo docker system prune -a -f
 ```
 安装 Snell
