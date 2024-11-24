@@ -45,7 +45,7 @@ sudo apt-get remove --purge -y docker docker-engine docker.io containerd runc do
 sudo apt-get autoremove -y && \
 sudo docker system prune -a -f
 ```
-
+安装 Snell
 ```
 bash <(curl -fsSL https://raw.githubusercontent.com/passeway/Snell/refs/heads/main/Snell-docker.sh)
 ```
