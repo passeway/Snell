@@ -41,8 +41,11 @@ rm -rf /root/snelldocker
 ```
 卸载Docker
 ```
-sudo apt-get remove --purge -y docker docker-engine docker.io containerd runc docker-compose-plugin && \
-sudo apt-get autoremove -y && \
+sudo docker stop $(sudo docker ps -aq) && \
+sudo docker rm $(sudo docker ps -aq) && \
+sudo docker rmi $(sudo docker images -q) --force && \
+sudo docker network prune -f && \
+sudo docker volume prune -f && \
 sudo docker system prune -a -f
 ```
 安装 Snell
