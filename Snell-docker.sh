@@ -90,7 +90,7 @@ EOF
 cd /root/snelldocker
 
 # 拉取并启动 Docker 容器
-docker compose pull && docker compose up -d
+docker compose pull && docker compose up -d && docker ps
 
 # 获取本机IP地址
 HOST_IP=$(curl -s http://checkip.amazonaws.com)
