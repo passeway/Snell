@@ -20,9 +20,9 @@ bash <(curl -fsSL snell-ten.vercel.app)
 ## 常用指令
 
 ```
-sudo systemctl start snell               # 启动 Snell 服务
-
 sudo systemctl stop snell                # 停止 Snell 服务
+
+sudo systemctl start snell               # 启动 Snell 服务
 
 sudo systemctl status snell              # 查看 Snell 状态
 
