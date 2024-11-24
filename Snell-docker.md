@@ -40,15 +40,7 @@ docker compose down && \
 rm -rf /root/snelldocker && \
 cd /root
 ```
-卸载Docker
-```
-sudo docker stop $(sudo docker ps -aq) 2>/dev/null && \
-sudo docker rm $(sudo docker ps -aq) 2>/dev/null && \
-sudo docker rmi $(sudo docker images -q) --force 2>/dev/null && \
-sudo docker network prune -f 2>/dev/null && \
-sudo docker volume prune -f 2>/dev/null && \
-sudo docker system prune -a -f
-```
+
 安装 Snell
 ```
 bash <(curl -fsSL https://raw.githubusercontent.com/passeway/Snell/refs/heads/main/Snell-docker.sh)
