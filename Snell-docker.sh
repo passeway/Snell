@@ -8,7 +8,13 @@ PURPLE='\033[0;35m'
 CYAN='\033[0;36m'
 RESET='\033[0m'
 
-
+# 检查是否以 root 权限运行
+check_root() {
+    if [ "$(id -u)" != "0" ]; then
+        echo -e "${RED}请以 root 权限运行此脚本${RESET}"
+        exit 1
+    fi
+}
 
 # 更新系统包和升级
 apt-get update && apt-get -y upgrade
