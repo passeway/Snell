@@ -29,6 +29,8 @@ docker --help           # Docker 帮助
 docker --version        # Docker 版本
 
 docker images           # Docker 镜像
+
+docker compose version  # compose版本
 ```
 卸载 Snell
 ```
