@@ -26,9 +26,11 @@ sudo docker start id           # 启动容器
 
 sudo docker --help             # Docker 帮助
 
+sudo docker images             # Docker 镜像
+
 sudo docker --version          # Docker 版本
 
-sudo docker images             # Docker 镜像
+sudo journalctl -u docker      # Docker 日志
 
 sudo systemctl stop docker     # Docker 停止
 
