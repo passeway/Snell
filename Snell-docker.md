@@ -14,23 +14,31 @@ sudo apt-get autoremove -y --purge
 
 常用指令
 ```
-docker ps               # 运行容器
+sudo docker ps                 # 运行容器
 
-docker ps -a            # 所有容器
+sudo docker ps -a              # 所有容器
 
-docker rm id            # 删除容器
+sudo docker rm id              # 删除容器
 
-docker stop id          # 停止容器
+sudo docker stop id            # 停止容器
 
-docker start id         # 启动容器
+sudo docker start id           # 启动容器
 
-docker --help           # Docker 帮助
+sudo docker --help             # Docker 帮助
 
-docker --version        # Docker 版本
+sudo docker --version          # Docker 版本
 
-docker images           # Docker 镜像
+sudo docker images             # Docker 镜像
 
-docker compose version  # compose版本
+sudo systemctl stop docker     # Docker 停止
+
+sudo systemctl start docker    # Docker 启动
+
+sudo systemctl restart docker  # Docker 重启
+
+sudo systemctl status docker   # Docker 状态
+
+sudo docker compose version    # compose版本
 ```
 卸载 Snell
 ```
