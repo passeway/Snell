@@ -19,21 +19,21 @@ sudo docker system prune -a -f
 
 常用指令
 ```
-docker ps             # 运行容器
+docker ps               # 运行容器
 
-#docker ps -a         # 所有容器
+#docker ps -a           # 所有容器
 
-docker rm id          # 删除容器
+docker rm id            # 删除容器
 
-docker stop id        # 停止容器
+docker stop id          # 停止容器
 
-docker start id       # 启动容器
+docker start id         # 启动容器
 
-docker --help         # Docker 帮助
+docker --help           # Docker 帮助
 
-docker --version      # Docker 版本
+docker --version        # Docker 版本
 
-docker images         # Docker 镜像
+docker images           # Docker 镜像
 ```
 卸载 Snell
 ```
