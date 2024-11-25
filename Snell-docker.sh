@@ -39,9 +39,6 @@ if [ -d "$HOME/.docker/cli-plugins/" ]; then
 fi
 
 
-# 安装 Docker Compose 插件
-apt-get install docker-compose-plugin -y
-
 
 # 创建所需目录
 mkdir -p /root/snelldocker/snell-conf
