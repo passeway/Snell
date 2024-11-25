@@ -8,7 +8,6 @@ curl -fsSL https://get.docker.com | bash -s docker
 ```
 sudo systemctl stop docker docker.socket
 sudo apt-get purge -y docker docker-engine docker.io containerd runc
-sudo apt-get autoremove -y
 sudo apt-get remove --purge -y docker-compose-plugin
 sudo apt-get autoremove -y
 ```
