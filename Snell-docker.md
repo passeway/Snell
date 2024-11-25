@@ -9,17 +9,8 @@ curl -fsSL https://get.docker.com | bash -s docker
 sudo systemctl stop docker docker.socket
 sudo apt-get purge -y docker docker-engine docker.io containerd runc
 sudo apt-get autoremove -y
-sudo rm -rf /usr/bin/docker
-sudo rm -rf /usr/bin/containerd
-sudo rm -rf /usr/bin/runc
-sudo rm -rf /usr/bin/docker-compose
-sudo rm -rf /var/lib/docker
-sudo rm -rf /etc/docker
-sudo rm -rf /var/run/docker.sock
 sudo apt-get remove --purge -y docker-compose-plugin
 sudo apt-get autoremove -y
-sudo docker system prune -a -f
-sudo systemctl daemon-reload
 ```
 
 常用指令
