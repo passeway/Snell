@@ -21,7 +21,7 @@ sudo docker system prune -a -f
 ```
 docker ps               # 运行容器
 
-#docker ps -a           # 所有容器
+docker ps -a           # 所有容器
 
 docker rm id            # 删除容器
 
