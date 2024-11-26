@@ -47,7 +47,7 @@ sudo docker compose version    # compose版本
 sudo docker stop snell
 sudo docker rm snell
 sudo docker rmi accors/snell
-sudo rm -rf /root/snelldocker
+sudo rm -rf /root/snell-docker
 ```
 
 安装 Snell
