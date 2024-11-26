@@ -52,7 +52,7 @@ mkdir -p /root/snell-docker/snell-conf
 
 # 生成随机端口和密码
 RANDOM_PORT=$(shuf -i 30000-65000 -n 1)
-RANDOM_PSK=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 20)
+RANDOM_PSK=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 16)
 
 
 # 检测系统架构
