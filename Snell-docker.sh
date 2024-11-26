@@ -47,7 +47,7 @@ fi
 
 
 # 创建所需目录
-mkdir -p /root/snelldocker/snell-conf
+mkdir -p /root/snell-docker/snell-conf
 
 
 # 生成随机端口和密码
@@ -68,7 +68,7 @@ else
 fi
 
 # 创建 docker-compose.yml
-cat > /root/snelldocker/docker-compose.yml << EOF
+cat > /root/snell-docker/docker-compose.yml << EOF
 services:
   snell:
     image: accors/snell:latest
@@ -82,7 +82,7 @@ services:
 EOF
 
 # 创建 snell.conf 配置文件
-cat > /root/snelldocker/snell-conf/snell.conf << EOF
+cat > /root/snell-docker/snell-conf/snell.conf << EOF
 [snell-server]
 listen = ::0:$RANDOM_PORT
 psk = $RANDOM_PSK
@@ -90,7 +90,7 @@ ipv6 = true
 EOF
 
 # 切换目录
-cd /root/snelldocker
+cd /root/snell-docker
 
 # 拉取并启动 Docker 容器
 docker compose pull && docker compose up -d && sleep 3 && docker logs snell
