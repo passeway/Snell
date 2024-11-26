@@ -24,6 +24,8 @@ sudo docker stop id            # 停止容器
 
 sudo docker start id           # 启动容器
 
+sudo docker restart id         # 重启容器
+
 sudo docker --help             # Docker 帮助
 
 sudo docker images             # Docker 镜像
