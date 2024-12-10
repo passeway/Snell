@@ -18,13 +18,6 @@ SERVICE_NAME="snell.service"
 # 检测系统类型
 get_system_type() {
     if [ -f /etc/debian_version ]; then
-        if [ -f /etc/os-release ]; then
-            . /etc/os-release
-            if [ "$ID" = "ubuntu" ]; then
-                echo -e "${GREEN}ubuntu${RESET}"
-                return
-            fi
-        fi
         echo -e "${GREEN}debian${RESET}"
     elif [ -f /etc/redhat-release ]; then
         echo -e "${GREEN}centos${RESET}"
