@@ -18,11 +18,11 @@ SERVICE_NAME="snell.service"
 # 检测系统类型
 get_system_type() {
     if [ -f /etc/debian_version ]; then
-        echo -e "${GREEN}debian${RESET}"
+        echo "debian"
     elif [ -f /etc/redhat-release ]; then
-        echo -e "${GREEN}centos${RESET}"
+        echo "centos"
     else
-        echo -e "${GREEN}unknown${RESET}"
+        echo "unknown"
     fi
 }
 
