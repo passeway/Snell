@@ -368,7 +368,6 @@ show_menu() {
     echo -e "${GREEN}=== Snell 管理工具 ===${RESET}"
     echo -e "安装状态: ${installation_status}"
     echo -e "运行状态: ${running_status}"
-    echo -e "系统类型: $(get_system_type)"
     echo ""
     echo "1. 安装 Snell 服务"
     echo "2. 卸载 Snell 服务"
