@@ -15,20 +15,21 @@ LOG_FILE="/var/log/snell_manager.log"
 # 服务名称
 SERVICE_NAME="snell.service"
 
+# 检测系统类型
 get_system_type() {
     if [ -f /etc/debian_version ]; then
         if [ -f /etc/os-release ]; then
             . /etc/os-release
             if [ "$ID" = "ubuntu" ]; then
-                echo "ubuntu"
+                echo -e "${GREEN}ubuntu${RESET}"
                 return
             fi
         fi
-        echo "debian"
+        echo -e "${GREEN}debian${RESET}"
     elif [ -f /etc/redhat-release ]; then
-        echo "centos"
+        echo -e "${GREEN}centos${RESET}"
     else
-        echo "unknown"
+        echo -e "${GREEN}unknown${RESET}"
     fi
 }
 
