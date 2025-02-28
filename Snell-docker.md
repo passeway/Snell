@@ -54,5 +54,5 @@ sudo rm -rf /root/snell-docker
 
 安装 Snell
 ```
-bash <(curl -fsSL https://raw.githubusercontent.com/passeway/Snell/refs/heads/main/Snell-docker.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/passeway/Snell/main/Snell-docker.sh)
 ```
