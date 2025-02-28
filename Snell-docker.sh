@@ -19,14 +19,13 @@ check_root() {
 # 更新系统包和升级
 apt-get update && apt-get -y upgrade
 
-
 # 检测是否已安装 Docker
 if command -v docker >/dev/null 2>&1; then
     echo "Docker 已经安装"
     docker --version
 else
     echo "正在安装 Docker"
-    # 安装 Docker
+    # 安装 Docker（会自动安装 Docker Compose）
     curl -fsSL https://get.docker.com | bash -s docker
     if [ $? -ne 0 ]; then
         echo "Docker 安装失败，请检查网络连接或安装脚本"
@@ -35,7 +34,7 @@ else
     echo "Docker 安装成功！"
 fi
 
-# 判断并卸载不同版本的 Docker Compose
+# 判断并卸载不同版本的 Docker Compose（如果有）
 if [ -f "/usr/local/bin/docker-compose" ]; then
     sudo rm /usr/local/bin/docker-compose
 fi
@@ -44,16 +43,12 @@ if [ -d "$HOME/.docker/cli-plugins/" ]; then
     rm -rf $HOME/.docker/cli-plugins/
 fi
 
-
-
 # 创建所需目录
 mkdir -p /root/snell-docker/snell-conf
-
 
 # 生成随机端口和密码
 RANDOM_PORT=$(shuf -i 30000-65000 -n 1)
 RANDOM_PSK=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 16)
-
 
 # 检测系统架构
 ARCH=$(uname -m)
@@ -96,11 +91,10 @@ cd /root/snell-docker
 docker compose pull && docker compose up -d && sleep 3 && docker logs snell
 
 # 获取本机IP地址
-HOST_IP=$(curl -s http://checkip.amazonaws.com)
+HOST_IP=$(curl -s http://checkip.amazonaws.com || echo "无法获取 IP 地址")
 
 # 获取IP所在国家
-IP_COUNTRY=$(curl -s http://ipinfo.io/$HOST_IP/country)
-
+IP_COUNTRY=$(curl -s http://ipinfo.io/$HOST_IP/country || echo "无法获取国家信息")
 
 # 输出客户端信息
 echo -e "${GREEN}Snell 示例配置${RESET}"
