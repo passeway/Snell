@@ -104,7 +104,7 @@ IP_COUNTRY=$(curl -s http://ipinfo.io/$HOST_IP/country)
 
 # 输出客户端信息
 echo -e "${GREEN}Snell 示例配置${RESET}"
-cat << EOF > /root/snelldocker/snell-conf/snell.txt
+cat << EOF > /root/snell-docker/snell-conf/snell.txt
 ${IP_COUNTRY} = snell, ${HOST_IP}, ${RANDOM_PORT}, psk = ${RANDOM_PSK}, version = 4, reuse = true
 EOF
-cat /root/snelldocker/snell-conf/snell.txt
+cat /root/snell-docker/snell-conf/snell.txt
