@@ -14,17 +14,17 @@ sudo apt-get autoremove -y --purge
 
 常用指令
 ```
-sudo docker ps                 # 运行容器
+sudo docker ps                 # 查看运行容器
 
-sudo docker ps -a              # 所有容器
+sudo docker ps -a              # 查看所有容器
 
-sudo docker rm id              # 删除容器
+sudo docker rm id              # 删除所选容器
 
-sudo docker stop id            # 停止容器
+sudo docker stop id            # 停止所选容器
 
-sudo docker start id           # 启动容器
+sudo docker start id           # 启动所选容器
 
-sudo docker restart id         # 重启容器
+sudo docker restart id         # 重启所选容器
 
 sudo docker --help             # Docker 帮助
 
