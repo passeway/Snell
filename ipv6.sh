@@ -2,12 +2,11 @@
 
 # 定义函数：检测 IP 类型并设置 DNS64（如果是纯 IPv6）
 v4orv6() {
-    echo "正在检测 IPv4 出口地址..."
+    echo "正在检测 IPv4 出口地址"
     
     # 判断 curl 是否能获取 IPv4 地址（使用 -s 静默，-4 强制 IPv4，-m5 超时5秒，-k 忽略证书）
     if [ -z "$(curl -s4m5 icanhazip.com -k)" ]; then
         echo
-        echo -e "\e[31m~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\e[0m"
         echo -e "\e[33m检测到 纯 IPV6 VPS，正在写入 DNS64 配置到 /etc/resolv.conf...\e[0m"
         
         # 写入 DNS64 服务器
