@@ -13,11 +13,16 @@ nameserver 2a00:1098:2b::1
 nameserver 2a00:1098:2c::1
 nameserver 2a01:4f8:c2c:123f::1
 EOF
-    else
+
+        # 输出 /etc/resolv.conf 内容以确认修改
         cat /etc/resolv.conf
+    else
         echo -e "\e[32m检测到支持 IPv4，系统为双栈 VPS。\e[0m"
     fi
 }
 
 # 执行检测函数
 v4orv6
+
+# 删除脚本文件
+rm -f ipv6.sh
