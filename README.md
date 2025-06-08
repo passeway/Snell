@@ -31,5 +31,3 @@ bash <(curl -fsSL snell-ten.vercel.app)
 
 
 ## 项目地址：https://manual.nssurge.com/others/snell.html
-## 赞助
-[![Powered by DartNode](https://dartnode.com/branding/DN-Open-Source-sm.png)](https://dartnode.com "Powered by DartNode - Free VPS for Open Source")
