@@ -222,7 +222,7 @@ EOF
 
     # 查看 Snell 日志
     echo -e "${GREEN}Snell 安装成功${RESET}"
-    sleep 3 && journalctl -u snell.service -n 5 --no-pager
+    sleep 3 && journalctl -u snell.service -n 8 --no-pager
 
     # 获取本机IP地址
     HOST_IP=$(curl -s http://checkip.amazonaws.com)
@@ -304,7 +304,7 @@ update_snell() {
         exit 1
     fi
 
-    echo -e "${GREEN}Snell 更新成功${RESET}"
+    echo -e "${GREEN}Snell 更新成功，非TF版本请改为version = 4${RESET}"
     cat /etc/snell/config.txt
 }
 
