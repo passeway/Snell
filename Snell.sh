@@ -117,7 +117,7 @@ install_snell() {
 
     # 下载 Snell 服务器文件
     ARCH=$(arch)
-    VERSION="v4.1.1"
+    VERSION="v5.0.0b1"
     SNELL_URL=""
     INSTALL_DIR="/usr/local/bin"
     SYSTEMD_SERVICE_FILE="/lib/systemd/system/snell.service"
@@ -183,9 +183,11 @@ After=network.target
 Type=simple
 User=snell
 Group=snell
+ExecStart=/usr/local/bin/snell-server -c /etc/snell/snell.conf
+AmbientCapabilities=CAP_NET_BIND_SERVICE CAP_NET_ADMIN CAP_NET_RAW
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_NET_ADMIN CAP_NET_RAW
 LimitNOFILE=32768
-ExecStart=${INSTALL_DIR}/snell-server -c ${CONF_FILE}
-AmbientCapabilities=CAP_NET_BIND_SERVICE
+Restart=on-failure
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=snell-server
