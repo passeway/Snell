@@ -268,7 +268,7 @@ update_snell() {
 
     # 下载 Snell 服务器文件
     ARCH=$(arch)
-    VERSION="v4.1.1"
+    VERSION="v5.0.0b1"
     SNELL_URL=""
 
     if [[ ${ARCH} == "aarch64" ]]; then
