@@ -171,7 +171,6 @@ install_snell() {
 listen = ::0:${RANDOM_PORT}
 psk = ${RANDOM_PSK}
 ipv6 = true
-version = 5
 EOF
 
     # 创建 Systemd 服务文件
@@ -184,7 +183,7 @@ After=network.target
 Type=simple
 User=snell
 Group=snell
-ExecStart=/usr/local/bin/snell-server -c /etc/snell/snell.conf
+ExecStart=${INSTALL_DIR}/snell-server -c ${CONF_FILE}
 AmbientCapabilities=CAP_NET_BIND_SERVICE CAP_NET_ADMIN CAP_NET_RAW
 CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_NET_ADMIN CAP_NET_RAW
 LimitNOFILE=32768
