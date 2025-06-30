@@ -171,6 +171,7 @@ install_snell() {
 listen = ::0:${RANDOM_PORT}
 psk = ${RANDOM_PSK}
 ipv6 = true
+version = 5
 EOF
 
     # 创建 Systemd 服务文件
