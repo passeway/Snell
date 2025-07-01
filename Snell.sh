@@ -221,7 +221,7 @@ EOF
     fi
 
     # 查看 Snell 日志
-    echo -e "${GREEN}Snell 安装成功${RESET}"
+    echo -e "${GREEN}Snell ${VERSION}安装成功${RESET}"
     sleep 3 && journalctl -u snell.service -n 8 --no-pager
 
     # 获取本机IP地址
@@ -230,7 +230,7 @@ EOF
     # 获取IP所在国家
     IP_COUNTRY=$(curl -s http://ipinfo.io/${HOST_IP}/country)
 
-    echo -e "${GREEN}Snell 示例配置，非TF版本请改为version = 4${RESET}"
+    echo -e "${GREEN}Snell ${VERSION}示例配置，非TF版本请改为version = 4${RESET}"
     cat << EOF > /etc/snell/config.txt
 ${IP_COUNTRY} = snell, ${HOST_IP}, ${RANDOM_PORT}, psk = ${RANDOM_PSK}, version = 5, reuse = true
 EOF
@@ -247,7 +247,7 @@ update_snell() {
         return
     fi
 
-    echo -e "${GREEN}Snell 正在更新${RESET}"
+    echo -e "${GREEN}Snell ${VERSION}正在更新${RESET}"
 
     # 停止 Snell
     if ! systemctl stop snell; then
@@ -304,7 +304,7 @@ update_snell() {
         exit 1
     fi
 
-    echo -e "${GREEN}Snell 更新成功，非TF版本请改为version = 4${RESET}"
+    echo -e "${GREEN}Snell ${VERSION}更新成功，非TF版本请改为version = 4${RESET}"
     cat /etc/snell/config.txt
 }
 
