@@ -103,7 +103,7 @@ stop_snell() {
 
 # 安装 Snell
 install_snell() {
-    echo -e "${GREEN}正在安装 Snell ${VERSION}${RESET}"
+    echo -e "${GREEN}正在安装Snell ${VERSION}${RESET}"
 
     # 等待包管理器
     wait_for_package_manager
@@ -310,7 +310,7 @@ update_snell() {
 
 # 卸载 Snell
 uninstall_snell() {
-    echo -e "${GREEN}正在卸载 Snell ${VERSION}${RESET}"
+    echo -e "${GREEN}正在卸载Snell ${VERSION}${RESET}"
 
     # 停止 Snell 服务
     systemctl stop snell
