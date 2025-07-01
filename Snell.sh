@@ -40,7 +40,7 @@ wait_for_package_manager() {
 # 安装必要的软件包
 install_required_packages() {
     local system_type=$(get_system_type)
-    echo -e "${GREEN}安装必要的软件包${RESET}"
+    echo -e "${GREEN}安装和更新必要的软件包${RESET}"
     
     if [ "$system_type" = "debian" ]; then
         apt update
@@ -103,7 +103,7 @@ stop_snell() {
 
 # 安装 Snell
 install_snell() {
-    echo -e "${GREEN}正在安装 Snell${RESET}"
+    echo -e "${GREEN}正在安装 Snell ${VERSION}${RESET}"
 
     # 等待包管理器
     wait_for_package_manager
@@ -310,7 +310,7 @@ update_snell() {
 
 # 卸载 Snell
 uninstall_snell() {
-    echo -e "${GREEN}正在卸载 Snell${RESET}"
+    echo -e "${GREEN}正在卸载 Snell ${VERSION}${RESET}"
 
     # 停止 Snell 服务
     systemctl stop snell
@@ -343,7 +343,7 @@ uninstall_snell() {
     rm /usr/local/bin/snell-server
     rm -rf /etc/snell
 
-    echo -e "${GREEN}Snell 卸载成功${RESET}"
+    echo -e "${GREEN}Snell ${VERSION}卸载成功${RESET}"
     echo "$(date '+%Y-%m-%d %H:%M:%S') - Snell 卸载成功" >> "$LOG_FILE"
 }
 
