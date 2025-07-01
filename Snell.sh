@@ -40,7 +40,7 @@ wait_for_package_manager() {
 # 安装必要的软件包
 install_required_packages() {
     local system_type=$(get_system_type)
-    echo -e "${GREEN}安装和更新必要的软件包${RESET}"
+    echo -e "${GREEN}安装必要的软件包${RESET}"
     
     if [ "$system_type" = "debian" ]; then
         apt update
@@ -103,7 +103,7 @@ stop_snell() {
 
 # 安装 Snell
 install_snell() {
-    echo -e "${GREEN}正在安装Snell ${VERSION}${RESET}"
+    echo -e "${GREEN}正在安装 Snell${RESET}"
 
     # 等待包管理器
     wait_for_package_manager
@@ -221,7 +221,7 @@ EOF
     fi
 
     # 查看 Snell 日志
-    echo -e "${GREEN}Snell ${VERSION}安装成功${RESET}"
+    echo -e "${GREEN}Snell 安装成功${RESET}"
     sleep 3 && journalctl -u snell.service -n 8 --no-pager
 
     # 获取本机IP地址
@@ -230,7 +230,7 @@ EOF
     # 获取IP所在国家
     IP_COUNTRY=$(curl -s http://ipinfo.io/${HOST_IP}/country)
 
-    echo -e "${GREEN}Snell ${VERSION}示例配置，非TF版本请改为version = 4${RESET}"
+    echo -e "${GREEN}Snell 示例配置，非TF版本请改为version = 4${RESET}"
     cat << EOF > /etc/snell/config.txt
 ${IP_COUNTRY} = snell, ${HOST_IP}, ${RANDOM_PORT}, psk = ${RANDOM_PSK}, version = 5, reuse = true
 EOF
@@ -247,7 +247,7 @@ update_snell() {
         return
     fi
 
-    echo -e "${GREEN}Snell ${VERSION}正在更新${RESET}"
+    echo -e "${GREEN}Snell 正在更新${RESET}"
 
     # 停止 Snell
     if ! systemctl stop snell; then
@@ -304,13 +304,13 @@ update_snell() {
         exit 1
     fi
 
-    echo -e "${GREEN}Snell ${VERSION}更新成功，非TF版本请改为version = 4${RESET}"
+    echo -e "${GREEN}Snell 更新成功，非TF版本请改为version = 4${RESET}"
     cat /etc/snell/config.txt
 }
 
 # 卸载 Snell
 uninstall_snell() {
-    echo -e "${GREEN}正在卸载Snell ${VERSION}${RESET}"
+    echo -e "${GREEN}正在卸载 Snell${RESET}"
 
     # 停止 Snell 服务
     systemctl stop snell
@@ -343,9 +343,10 @@ uninstall_snell() {
     rm /usr/local/bin/snell-server
     rm -rf /etc/snell
 
-    echo -e "${GREEN}Snell ${VERSION}卸载成功${RESET}"
+    echo -e "${GREEN}Snell 卸载成功${RESET}"
     echo "$(date '+%Y-%m-%d %H:%M:%S') - Snell 卸载成功" >> "$LOG_FILE"
 }
+
 
 # 显示菜单
 show_menu() {
@@ -362,14 +363,17 @@ show_menu() {
         else
             running_status="${RED}未启动${RESET}"
         fi
+        version_status="${CYAN}${VERSION}${RESET}"
     else
         installation_status="${RED}未安装${RESET}"
         running_status="${RED}未启动${RESET}"
+        version_status="—"
     fi
 
     echo -e "${GREEN}=== Snell 管理工具 ===${RESET}"
     echo -e "安装状态: ${installation_status}"
     echo -e "运行状态: ${running_status}"
+    echo -e "安装版本: ${version_status}"
     echo ""
     echo "1. 安装 Snell 服务"
     echo "2. 卸载 Snell 服务"
@@ -387,6 +391,7 @@ show_menu() {
     read -p "请输入选项编号: " choice
     echo ""
 }
+
 
 # 捕获 Ctrl+C 信号
 trap 'echo -e "${RED}已取消操作${RESET}"; exit' INT
