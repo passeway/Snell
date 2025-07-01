@@ -348,6 +348,7 @@ uninstall_snell() {
 }
 
 
+
 # 显示菜单
 show_menu() {
     clear
@@ -358,12 +359,18 @@ show_menu() {
 
     if [ $snell_installed -eq 0 ]; then
         installation_status="${GREEN}已安装${RESET}"
+        if version_output=$(/usr/local/bin/snell-server -version 2>/dev/null); then
+            snell_version=$(echo "$version_output" | grep -oE 'v[0-9]+\.[0-9]+\.[^ ]+')
+            version_status="${CYAN}${snell_version}${RESET}"
+        else
+            version_status="${YELLOW}未知版本${RESET}"
+        fi
+
         if [ $snell_running -eq 0 ]; then
             running_status="${GREEN}已启动${RESET}"
         else
             running_status="${RED}未启动${RESET}"
         fi
-        version_status="${CYAN}${VERSION}${RESET}"
     else
         installation_status="${RED}未安装${RESET}"
         running_status="${RED}未启动${RESET}"
@@ -391,6 +398,7 @@ show_menu() {
     read -p "请输入选项编号: " choice
     echo ""
 }
+
 
 
 # 捕获 Ctrl+C 信号
