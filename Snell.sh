@@ -361,12 +361,12 @@ show_menu() {
         if version_output=$(/usr/local/bin/snell-server -version 2>&1); then
             snell_version=$(echo "$version_output" | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+')
             if [ -n "$snell_version" ]; then
-                version_status="${CYAN}${snell_version}${RESET}"
+                version_status="${GREEN}${snell_version}${RESET}"
             else
-                version_status="${YELLOW}未知版本${RESET}"
+                version_status="${RED}未知版本${RESET}"
             fi
         else
-            version_status="${YELLOW}未知版本${RESET}"
+            version_status="${RED}未知版本${RESET}"
         fi
 
         if [ $snell_running -eq 0 ]; then
@@ -383,7 +383,7 @@ show_menu() {
     echo -e "${GREEN}=== Snell 管理工具 ===${RESET}"
     echo -e "安装状态: ${installation_status}"
     echo -e "运行状态: ${running_status}"
-    echo -e "安装版本: ${version_status}"
+    echo -e "运行版本: ${version_status}"
     echo ""
     echo "1. 安装 Snell 服务"
     echo "2. 卸载 Snell 服务"
