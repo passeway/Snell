@@ -117,7 +117,7 @@ install_snell() {
 
     # 下载 Snell 服务器文件
     ARCH=$(arch)
-    VERSION="v5.0.0b2"
+    VERSION="v5.0.0b3"
     SNELL_URL=""
     INSTALL_DIR="/usr/local/bin"
     SYSTEMD_SERVICE_FILE="/lib/systemd/system/snell.service"
@@ -268,7 +268,7 @@ update_snell() {
 
     # 下载 Snell 服务器文件
     ARCH=$(arch)
-    VERSION="v5.0.0b2"
+    VERSION="v5.0.0b3"
     SNELL_URL=""
 
     if [[ ${ARCH} == "aarch64" ]]; then
