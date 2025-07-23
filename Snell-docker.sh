@@ -54,9 +54,9 @@ RANDOM_PSK=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 16)
 ARCH=$(uname -m)
 
 if [ "$ARCH" == "x86_64" ]; then
-    DOWNLOAD_URL="https://dl.nssurge.com/snell/snell-server-v4.1.1-linux-amd64.zip"
+    DOWNLOAD_URL="https://dl.nssurge.com/snell/snell-server-v5.0.0-linux-amd64.zip"
 elif [[ "$ARCH" == "arm64" || "$ARCH" == "aarch64" ]]; then
-    DOWNLOAD_URL="https://dl.nssurge.com/snell/snell-server-v4.1.1-linux-aarch64.zip"
+    DOWNLOAD_URL="https://dl.nssurge.com/snell/snell-server-v5.0.0-linux-aarch64.zip"
 else
     echo "Unsupported architecture: $ARCH"
     exit 1
