@@ -30,4 +30,4 @@ bash <(curl -fsSL snell-ten.vercel.app)
 | `sudo vim /etc/snell/snell-server.conf`  | 修改 Snell 配置     |
 
 
-## 项目地址：https://manual.nssurge.com/others/snell.html
+## 项目地址：https://kb.nssurge.com/surge-knowledge-base/zh/release-notes/snell
