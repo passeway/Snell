@@ -38,6 +38,6 @@ bash <(curl -fsSL snell-ten.vercel.app)
 | - | - | - | 
 | PQS | ![vps_logo](https://img.passeway.de/picturebed/2025/08/b694645f915eaa5c088def21237872cd.png) | [https://www.pqs.pw](https://www.pqs.pw/aff.php?aff=661)
 
-*仅接受长期稳定运营，信誉良好的商家
+*仅接受长期稳定运营，信誉良好的商家 Telegram : https://t.me/passeway
 
 
