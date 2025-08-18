@@ -230,7 +230,7 @@ EOF
     # 获取IP所在国家
     IP_COUNTRY=$(curl -s http://ipinfo.io/${HOST_IP}/country)
 
-    echo -e "${GREEN}Snell 示例配置，非TF版本请改为version = 4${RESET}"
+    echo -e "${GREEN}Snell 示例配置，非TF版本请改为version = 4${RESET}，项目地址: https://github.com/passeway/Snell"
     cat << EOF > /etc/snell/config.txt
 ${IP_COUNTRY} = snell, ${HOST_IP}, ${RANDOM_PORT}, psk = ${RANDOM_PSK}, version = 5, reuse = true
 EOF
@@ -381,7 +381,6 @@ show_menu() {
     fi
 
     echo -e "${GREEN}=== Snell 管理工具 ===${RESET}"
-    echo -e "项目地址: https://github.com/passeway"
     echo -e "安装状态: ${installation_status}"
     echo -e "运行状态: ${running_status}"
     echo -e "运行版本: ${version_status}"
