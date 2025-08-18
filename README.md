@@ -30,4 +30,12 @@ bash <(curl -fsSL snell-ten.vercel.app)
 | `sudo vim /etc/snell/snell-server.conf`  | 修改 Snell 配置     |
 
 
-## 项目地址：https://kb.nssurge.com/surge-knowledge-base/zh/release-notes/snell
+## 项目地址：[https://kb.nssurge.com](https://kb.nssurge.com/surge-knowledge-base/zh/release-notes/snell)
+
+## 服务器赞助商
+
+| 赞助商 | 商标 | 网址 | 
+| - | - | - | 
+| PQS | ![vps_logo](https://img.passeway.de/picturebed/2025/08/b694645f915eaa5c088def21237872cd.png) | [https://www.pqs.pw](https://www.pqs.pw/aff.php?aff=661)
+
+
