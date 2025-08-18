@@ -381,6 +381,7 @@ show_menu() {
     fi
 
     echo -e "${GREEN}=== Snell 管理工具 ===${RESET}"
+    echo -e "项目地址: https://github.com/passeway"
     echo -e "安装状态: ${installation_status}"
     echo -e "运行状态: ${running_status}"
     echo -e "运行版本: ${version_status}"
