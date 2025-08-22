@@ -40,5 +40,8 @@ bash <(curl -fsSL snell-ten.vercel.app)
 ## 彼得巧網路資訊股份有限公司
 ![](https://img.passeway.de/picturebed/2025/08/f1c71c7c281f76d3fede82e7a2a92746.png)
 
+## PQS雲端服務(Virtual Dedicated Server)
+
+
 
 
