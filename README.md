@@ -36,7 +36,7 @@ bash <(curl -fsSL snell-ten.vercel.app)
 
 | 赞助商 | 商标 | 网址 | 专属优惠码 |
 | - | - | - | - |
-| PQS | ![vps_logo](https://img.passeway.de/picturebed/2025/08/70ff399e0e985970c4d11e8abb074d4c.png) | [https://www.pqs.pw](https://www.pqs.pw/aff.php?aff=661) | 月缴：PQS-PASSEWAY-MON（9.1折）<br>季缴：PQS-PASSEWAY-SEA（8.3折）<br>半年：PQS-PASSEWAY-HAF（7.9折）<br>一年：PQS-PASSEWAY-YEA（7.3折） |
+| PQS | ![vps_logo](https://img.passeway.de/picturebed/2025/08/70ff399e0e985970c4d11e8abb074d4c.png) | [https://www.pqs.pw](https://www.pqs.pw/aff.php?aff=661) | 月缴：PQS-PASSEWAY-MON <br>季缴：PQS-PASSEWAY-SEA<br> 半年：PQS-PASSEWAY-HAF <br> 一年：PQS-PASSEWAY-YEA |
 ## 彼得巧網路資訊股份有限公司
 ![](https://img.passeway.de/picturebed/2025/08/f1c71c7c281f76d3fede82e7a2a92746.png)
 
