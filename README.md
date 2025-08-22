@@ -34,9 +34,8 @@ bash <(curl -fsSL snell-ten.vercel.app)
 
 ## 服务器赞助商(仅接受长期稳定运营，信誉良好的商家)
 
-| 赞助商 | 商标 | 网址 | 
-| - | - | - | 
-| PQS | ![vps_logo](https://img.passeway.de/picturebed/2025/08/b694645f915eaa5c088def21237872cd.png) | [https://www.pqs.pw](https://www.pqs.pw/aff.php?aff=661)
-
+| 赞助商 | 商标 | 网址 | 专属优惠码 |
+| - | - | - | - |
+| PQS | ![vps_logo](https://img.passeway.de/picturebed/2025/08/b694645f915eaa5c088def21237872cd.png) | [https://www.pqs.pw](https://www.pqs.pw/aff.php?aff=661) | 月缴：PQS-PASSEWAY-MON（9.1折）<br>季缴：PQS-PASSEWAY-SEA（8.3折）<br>半年：PQS-PASSEWAY-HAF（7.9折）<br>一年：PQS-PASSEWAY-YEA（7.3折） |
 
 
