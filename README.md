@@ -42,6 +42,7 @@ bash <(curl -fsSL snell-ten.vercel.app)
 ![](https://img.passeway.de/picturebed/2025/08/f1c71c7c281f76d3fede82e7a2a92746.png)
 
 ## PQS雲端服務(Virtual Dedicated Server)
+![](https://img.passeway.de/picturebed/2025/08/ae2cdfba7c240e8976b182c1b028f823.jpg)
 
 
 
