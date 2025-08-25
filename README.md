@@ -8,7 +8,15 @@
 ```
 bash <(curl -fsSL snell-ten.vercel.app)
 ```
+# Snell
 
+Snell is a lean encrypted proxy protocol developed by our team. Here are some highlights:
+
+* Extreme performance.
+* Support UDP over TCP relay.
+* Single binary with zero dependencies. (except glibc)
+* A wizard to help you start.
+* Proxy server will report remote errors to the client if an error encounters. Clients may choose countermeasures for different scenarios.
 
 ## 常用指令
 
@@ -22,15 +30,7 @@ bash <(curl -fsSL snell-ten.vercel.app)
 | `sudo cat /etc/snell/snell-server.conf`  | 查看 Snell 配置     |
 | `sudo vim /etc/snell/snell-server.conf`  | 修改 Snell 配置     |
 
-# Snell
 
-Snell is a lean encrypted proxy protocol developed by our team. Here are some highlights:
-
-* Extreme performance.
-* Support UDP over TCP relay.
-* Single binary with zero dependencies. (except glibc)
-* A wizard to help you start.
-* Proxy server will report remote errors to the client if an error encounters. Clients may choose countermeasures for different scenarios.
 
 
 ## 项目地址：[https://kb.nssurge.com](https://kb.nssurge.com/surge-knowledge-base/zh/release-notes/snell)
