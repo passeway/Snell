@@ -10,7 +10,7 @@ bash <(curl -fsSL snell-ten.vercel.app)
 ```
 # Snell
 
-Snell is a lean encrypted proxy protocol developed by our team. Here are some highlights:
+Snell is a lean crypto proxy protocol developed by the Surge team. Here are some highlights:
 
 * Extreme performance.
 * Support UDP over TCP relay.
