@@ -9,13 +9,6 @@
 bash <(curl -fsSL snell-ten.vercel.app)
 ```
 
-## 详细说明
-
-- 执行脚本即可自动部署 Snell 代理服务器
-
-- 脚本会生成随机端口和 PSK 并配置在 Snell 服务器中
-
-- 执行完脚本后，你会得到客户端配置 url 方便快速设置
 
 ## 常用指令
 
@@ -28,6 +21,16 @@ bash <(curl -fsSL snell-ten.vercel.app)
 | `sudo journalctl -u snell.service -f`    | 查看 Snell 日志     |
 | `sudo cat /etc/snell/snell-server.conf`  | 查看 Snell 配置     |
 | `sudo vim /etc/snell/snell-server.conf`  | 修改 Snell 配置     |
+
+# Snell
+
+Snell is a lean encrypted proxy protocol developed by our team. Here are some highlights:
+
+* Extreme performance.
+* Support UDP over TCP relay.
+* Single binary with zero dependencies. (except glibc)
+* A wizard to help you start.
+* Proxy server will report remote errors to the client if an error encounters. Clients may choose countermeasures for different scenarios.
 
 
 ## 项目地址：[https://kb.nssurge.com](https://kb.nssurge.com/surge-knowledge-base/zh/release-notes/snell)
