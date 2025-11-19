@@ -9,8 +9,6 @@ PURPLE='\033[0;35m'
 CYAN='\033[0;36m'
 RESET='\033[0m'
 
-# 日志文件路径
-LOG_FILE="/var/log/snell_manager.log"
 
 # 服务名称
 SERVICE_NAME="snell.service"
