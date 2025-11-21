@@ -126,7 +126,6 @@ psk = ${RANDOM_PSK}
 ipv6 = true
 EOF
 
-    # ★ 写入 systemd（使用正确路径）
     cat > /etc/systemd/system/snell.service << EOF
 [Unit]
 Description=Snell Proxy Service
@@ -149,16 +148,12 @@ SyslogIdentifier=snell-server
 WantedBy=multi-user.target
 EOF
 
-    systemctl daemon-reload
-    systemctl enable snell
-    systemctl start snell
 
     echo -e "${GREEN}Snell 安装成功${RESET}"
+    systemctl daemon-reload && systemctl enable snell && systemctl start snell
     sleep 3 && journalctl -u snell.service -n 8 --no-pager
-
     HOST_IP=$(curl -s http://checkip.amazonaws.com)
     IP_COUNTRY=$(curl -s http://ipinfo.io/${HOST_IP}/country)
-
     echo -e "${GREEN}Snell 示例配置，项目地址: https://github.com/passeway/Snell${RESET}"
     cat << EOF > /etc/snell/config.txt
 ${IP_COUNTRY} = snell, ${HOST_IP}, ${RANDOM_PORT}, psk = ${RANDOM_PSK}, version = 5, reuse = true
@@ -175,7 +170,6 @@ update_snell() {
 
     echo -e "${GREEN}Snell 正在更新${RESET}"
     systemctl stop snell
-
     wait_for_package_manager
     install_required_packages
 
@@ -191,7 +185,6 @@ update_snell() {
     rm snell-server.zip
     chmod +x /usr/local/bin/snell-server
     systemctl restart snell
-
     echo -e "${GREEN}Snell 更新成功${RESET}"
     sleep 3 && journalctl -u snell.service -n 8 --no-pager
     echo -e "${GREEN}Snell 示例配置，项目地址: https://github.com/passeway/Snell${RESET}"
