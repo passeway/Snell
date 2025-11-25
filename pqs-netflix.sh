@@ -13,7 +13,7 @@ Font_Yellow="\033[33m"
 Font_Blue="\033[36m"
 Font_Suffix="\033[0m"
 
-UA_BROWSER="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36"
+UA_BROWSER="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36"
 ACCEPT_HDR='text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7'
 TITLE1="81280792"   # LEGO Ninjago
 TITLE2="70143836"   # Breaking Bad
