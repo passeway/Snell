@@ -33,7 +33,7 @@ test_netflix_once() {
         return
     fi
 
-    # 两个页面都包含 "Not Available" / "Oh no!" → Originals Only
+
     if echo "$r1$r2" | grep -q "Oh no"; then
         echo "STATUS=ORIGINALS"
         echo -e " Netflix:\t${Font_Yellow}[Originals Only]${Font_Suffix}"
