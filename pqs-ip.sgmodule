@@ -1,0 +1,13 @@
+#!name = PQS Auto Change IP
+#!desc = 监控 PQS IP 是否符合前缀，不符合自动更换（可填参数）
+
+[Argument]
+CHECK_URL = 请填写完整查询 URL（例如 https://api.pqs.pw/show/xxxxx）
+CHANGE_URL = 请填写完整切换 URL（例如 https://api.pqs.pw/ipch/xxxxx）
+REQUIRED_PREFIX = 填写要求的前缀（例如 111.）
+
+[Script]
+PQS-Change-IP = script-url=https://yourdomain.com/pqs-change-ip.js, cron-exp=*/1 * * * *, argument=CHECK_URL, argument=CHANGE_URL, argument=REQUIRED_PREFIX, timeout=60, wake-system=true
+
+[MITM]
+skip-server-cert-verify = true
