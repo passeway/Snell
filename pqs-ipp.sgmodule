@@ -1,9 +1,0 @@
-#!name=PQS Auto Change IP
-#!desc=自动监控并更换 PQS IP（支持参数编辑）
-#!arguments=查询URL:https://api.pqs.pw/show/xxxxx,更换URL:https://api.pqs.pw/ipch/xxxxx,前缀要求:111.
-
-[Script]
-PQS-Auto-IP = script-url=https://yourdomain.com/pqs.js,cron-exp=*/1 * * * *,timeout=60,wake-system=true,argument="{\"check\":\"{{{查询URL}}}\",\"change\":\"{{{更换URL}}}\",\"prefix\":\"{{{前缀要求}}}\"}"
-
-[MITM]
-skip-server-cert-verify = true
