@@ -7,7 +7,7 @@ CHANGE_URL = https://api.pqs.pw/ipch/xxxxx
 REQUIRED_PREFIX = 111.
 
 [Script]
-PQS-Auto-IP = script-url=https://yourdomain.com/pqs-change-ip.js, cron-exp=*/1 * * * *, timeout=60, wake-system=true, argument=CHECK_URL, argument=CHANGE_URL, argument=REQUIRED_PREFIX
+PQS-Auto-IP = script-url=https://raw.githubusercontent.com/passeway/Snell/refs/heads/main/pqs-ip.js, cron-exp=*/1 * * * *, timeout=60, wake-system=true, argument=CHECK_URL, argument=CHANGE_URL, argument=REQUIRED_PREFIX
 
 [MITM]
 skip-server-cert-verify = true
