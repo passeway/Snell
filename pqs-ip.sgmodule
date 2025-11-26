@@ -1,10 +1,9 @@
 #!name=PQS Auto Change IP
-#!desc=自动监控 PQS IP 并在不符合前缀时自动切换（支持参数）。
-
-[Argument]
-CHECK_URL = https://api.pqs.pw/show/xxxxx
-CHANGE_URL = https://api.pqs.pw/ipch/xxxxx
-REQUIRED_PREFIX = 111.
+#!desc=自动监控并更换 PQS IP（支持参数编辑）
+#!arguments=查询URL:https://api.pqs.pw/show/xxxxx,更换URL:https://api.pqs.pw/ipch/xxxxx,前缀要求:111.
 
 [Script]
-PQS-Auto-IP = script-url=https://raw.githubusercontent.com/passeway/Snell/refs/heads/main/pqs-ip.js, cron-exp=*/1 * * * *, timeout=60, argument=CHECK_URL, argument=CHANGE_URL, argument=REQUIRED_PREFIX
+PQS-Auto-IP = script-url=https://raw.githubusercontent.com/passeway/Snell/refs/heads/main/pqs-ip.js,cron-exp=*/1 * * * *,timeout=60,wake-system=true,argument="{\"check\":\"{{{查询URL}}}\",\"change\":\"{{{更换URL}}}\",\"prefix\":\"{{{前缀要求}}}\"}"
+
+[MITM]
+skip-server-cert-verify = true
