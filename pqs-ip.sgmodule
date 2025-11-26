@@ -1,5 +1,5 @@
 #!name=PQS Auto Change IP
-#!desc=自动监控 PQS IP，并在不符合前缀时自动切换。可自定义参数。
+#!desc=自动监控 PQS IP 并在不符合前缀时自动切换（支持参数）。
 
 [Argument]
 CHECK_URL = https://api.pqs.pw/show/xxxxx
@@ -7,7 +7,4 @@ CHANGE_URL = https://api.pqs.pw/ipch/xxxxx
 REQUIRED_PREFIX = 111.
 
 [Script]
-PQS-Auto-IP = script-url=https://raw.githubusercontent.com/passeway/Snell/refs/heads/main/pqs-ip.js, cron-exp=*/1 * * * *, timeout=60, wake-system=true, argument=CHECK_URL, argument=CHANGE_URL, argument=REQUIRED_PREFIX
-
-[MITM]
-skip-server-cert-verify = true
+PQS-Auto-IP = script-url=https://raw.githubusercontent.com/passeway/Snell/refs/heads/main/pqs-ip.js, cron-exp=*/1 * * * *, timeout=60, argument=CHECK_URL, argument=CHANGE_URL, argument=REQUIRED_PREFIX
