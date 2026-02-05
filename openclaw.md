@@ -270,26 +270,9 @@ openclaw models demote
 看状态   → openclaw status
 改配置   → openclaw configure
 看模型   → openclaw models list
-切模型   → openclaw agent set
+切模型   → openclaw models set openai-codex/gpt-5.2
 查问题   → openclaw logs --follow
 ```
 
 ---
 
-## ✅ 推荐常用组合（高频）
-
-```bash
-openclaw status
-openclaw models list
-openclaw logs --follow
-```
-
----
-
-### 如果你愿意，下一步我可以帮你：
-
-* 📄 生成 **PDF / README.md** 版本
-* 🧠 给你画一张 **OpenClaw CLI 心智图**
-* ⚙️ 输出一份 **只保留你当前需要的最小指令集**
-
-你说要哪一个，我就直接给你。
