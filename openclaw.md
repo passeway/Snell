@@ -1,278 +1,171 @@
-**`OpenClaw 常用指令大全（Markdown 速查版）`**，
-**按真实可用（你当前 2026.2.x 版本）+ 实际使用频率整理**
+############################
+# A) OpenClaw：日常查看與控制
+############################
 
----
-
-# 🦞 OpenClaw 常用指令速查表
-
-> 适用版本：OpenClaw `2026.2.x`
-> 说明：只列 **真实存在、你敲了就能用的命令**（不包含设计中/已废弃）
-
----
-
-## 📌 1. 状态 / 总览（最常用）
-
-### 查看整体运行状态
-
-```bash
 openclaw status
-```
+# 看總狀態（最常用）：Gateway、模型、通道、session、安全摘要
 
-### 深度状态检查（推荐排障时用）
-
-```bash
 openclaw status --deep
-```
+# 深度檢查：包含更多探測與診斷資訊
 
-### 展示所有信息（适合分享/完整诊断）
+openclaw gateway status
+# 只看 Gateway 服務狀態（是否可連、是否在跑）
 
-```bash
-openclaw status --all
-```
+openclaw gateway start
+# 啟動 Gateway
 
----
+openclaw gateway stop
+# 停止 Gateway
 
-## ⚙️ 2. 配置相关
+openclaw gateway restart
+# 重啟 Gateway（改配置後常用）
 
-### 进入配置向导（核心命令）
+openclaw logs --follow
+# 即時追蹤日誌（像 tail -f）
 
-```bash
+
+################################
+# B) OpenClaw：配置、安全、修復
+################################
+
 openclaw configure
-```
+# 進入配置流程（首次部署或調整設定）
 
-用途：
+openclaw configure --section gateway
+# 只配置 gateway 區塊（token、bind 等）
 
-* 选择 / 切换模型
-* OAuth 登录
-* Gateway / Channel / Skills 配置
-  ⚠️ 不会重装、不清空
+openclaw configure --section web
+# 配 web_search 相關（例如 Brave API key）
 
----
-
-### 初始化环境（⚠️ 仅首次使用）
-
-```bash
-openclaw onboard
-```
-
-> ⚠️ 已部署环境 **不要再跑**
-
----
-
-## 🤖 3. 模型相关
-
-### 列出当前可用模型（权威）
-
-```bash
-openclaw models list
-```
-
-可查看：
-
-* default / fallback
-* Auth 状态
-* 上下文大小
-
----
-
-### 查看模型命中情况（结合日志）
-
-```bash
-openclaw logs --follow
-```
-
----
-
-## 👤 4. Agent 管理
-
-### 查看所有 agent
-
-```bash
-openclaw agent list
-```
-
----
-
-### 设置 agent 默认模型（指令式切换）
-
-```bash
-openclaw agent set main \
-  --model openai/gpt-5.2-codex \
-  -m "switch default model"
-```
-
-> ⚠️ `-m / --message` **必须有**
-
----
-
-## 🧵 5. Session 管理
-
-### 查看当前 sessions
-
-```bash
-openclaw sessions list
-```
-
----
-
-### 查看某个 session 详情
-
-```bash
-openclaw sessions show <session-id>
-```
-
----
-
-### 关闭 session（立即生效新模型）
-
-```bash
-openclaw sessions close <session-id>
-```
-
----
-
-## 🌐 6. Gateway / 服务
-
-### 前台运行 Gateway
-
-```bash
-openclaw gateway run
-```
-
----
-
-### 安装 systemd 服务
-
-```bash
-openclaw daemon install
-```
-
----
-
-### Gateway systemd 日志
-
-```bash
-journalctl -u openclaw-gateway -f
-```
-
----
-
-## 📡 7. Channel（如 Telegram）
-
-### 查看 channel 状态
-
-```bash
-openclaw channels list
-```
-
----
-
-### 测试某个 channel
-
-```bash
-openclaw channels test telegram
-```
-
----
-
-## 🧠 8. Skills
-
-### 查看已加载的 skills
-
-```bash
-openclaw skills list
-```
-
----
-
-## 🔍 9. 日志 / 调试
-
-### 查看最近日志
-
-```bash
-openclaw logs
-```
-
----
-
-### 实时跟踪日志（推荐）
-
-```bash
-openclaw logs --follow
-```
-
----
-
-## 🛡 10. 安全 / 诊断
-
-### 安全审计
-
-```bash
 openclaw security audit
-```
+# 安全檢查（快速版）
 
----
-
-### 深度安全审计
-
-```bash
 openclaw security audit --deep
-```
+# 安全檢查（深入版）
 
----
-
-### 环境体检（部分版本存在）
-
-```bash
 openclaw doctor
-```
+# 檢查安裝/服務異常
 
----
+openclaw doctor --repair
+# 自動修復常見問題（服務檔、環境等）
 
-## 🔄 11. 更新 / 维护
 
-### 查看是否有更新
+#######################
+# C) OpenClaw：更新
+#######################
 
-```bash
-openclaw status
-```
-
-### 执行更新
-
-```bash
 openclaw update
-```
+# 升級到新版本
 
-> ⚠️ 建议系统稳定后再更新
 
----
+#########################################
+# D) systemd（你這台 VPS 很常用）
+#########################################
 
-## ❌ 12. 常见误用（避坑）
+openclaw gateway install
+# 安裝 user-level systemd 服務（openclaw-gateway.service）
 
-### ❌ 已部署环境不要用
+systemctl --user enable openclaw-gateway.service
+# 設成開機（用戶層）自啟動
 
-```bash
-openclaw onboard
-```
+systemctl --user start openclaw-gateway.service
+# 啟動服務
 
-### ❌ 下面这些在你版本里不存在
+systemctl --user restart openclaw-gateway.service
+# 重啟服務
 
-```text
-openclaw models promote
-openclaw models demote
-```
+systemctl --user status openclaw-gateway.service --no-pager
+# 查看服務狀態（不分頁）
 
----
+journalctl --user -u openclaw-gateway.service -n 200 --no-pager
+# 看最近 200 行服務日誌
 
-## 🧠 一句话记忆法
+journalctl --user -u openclaw-gateway.service -f
+# 即時追服務日誌
 
-```text
-看状态   → openclaw status
-改配置   → openclaw configure
-看模型   → openclaw models list
-切模型   → openclaw models set openai-codex/gpt-5.2
-查问题   → openclaw logs --follow
-```
 
----
+############################
+# E) OpenCode：安裝與維護
+############################
 
+curl -fsSL https://opencode.ai/install | bash
+# 安裝 OpenCode（官方安裝腳本）
+
+opencode --version
+# 看版本，確認可用
+
+opencode upgrade
+# 升級 OpenCode
+
+opencode uninstall
+# 卸載 OpenCode
+
+
+################################
+# F) OpenCode：登入與模型管理
+################################
+
+opencode auth list
+# 查看已登入的供應商憑證
+
+opencode auth login
+# 新增供應商登入（OpenAI/Anthropic/...）
+
+opencode auth logout
+# 登出已配置供應商
+
+opencode models
+# 列出可用模型
+
+opencode models openai
+# 只列 OpenAI 供應商模型（若支援）
+
+
+############################
+# G) OpenCode：實際執行任務
+############################
+
+opencode
+# 進入互動式 TUI
+
+opencode run "你的任务描述"
+# 一次性執行任務（CLI 模式）
+
+opencode run "只回复当前使用的模型ID"
+# 快速檢查目前預設模型
+
+opencode -m openai/gpt-5.3-codex
+# 指定模型啟動（臨時覆蓋）
+
+
+############################
+# H) OpenCode：會話與資料
+############################
+
+opencode session list
+# 查看現有會話列表
+
+opencode stats
+# 查看 token/cost 統計
+
+opencode export
+# 導出 session 資料（JSON）
+
+opencode import <file_or_url>
+# 匯入 session 資料
+
+
+#############################################
+# I) 你現在最實用的三連（每天都用得到）
+#############################################
+
+openclaw status
+# 先確認 OpenClaw 全局健康
+
+opencode run "请只回复当前使用的模型ID"
+# 確認 OpenCode 正在用哪個模型
+
+openclaw logs --follow
+# 有異常時立刻追日誌
+
+如果你要，我下一則幫你做「極簡版 10 條」（只留最必要指令，給手機看超快）。
