@@ -42,6 +42,11 @@ openclaw logs --follow
 ## B) OpenClaw：配置、安全、修复
 
 ```bash
+openclaw onboard
+# 使用默认交互式初始化（推荐）
+```
+
+```bash
 openclaw configure
 # 进入交互式配置流程（首次部署或调整设置）
 ```
