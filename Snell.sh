@@ -248,7 +248,9 @@ show_menu() {
         fi
     fi
     echo "4. 更新 Snell 服务"
-    echo "5. 查看 Snell 配置"
+    echo "5. 重启 Snell 服务"
+    echo "6. 查看 Snell 服务"
+    echo "7. 查看 Snell 配置"
     echo "0. 退出"
     echo -e "${GREEN}======================${RESET}"
     read -p "请输入选项编号: " choice
@@ -289,6 +291,12 @@ main() {
                 update_snell
                 ;;
             5)
+                systemctl restart snell
+                ;;
+            6)
+                systemctl status snell
+                ;;
+            7)
                 if [ -f /etc/snell/config.txt ]; then
                     cat /etc/snell/config.txt
                 else
