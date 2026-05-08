@@ -14,6 +14,8 @@ get_system_type() {
         echo "debian"
     elif [ -f /etc/redhat-release ]; then
         echo "centos"
+    elif [ -f /etc/arch-release ]; then
+        echo "archlinux"
     else
         echo "unknown"
     fi
@@ -39,6 +41,9 @@ install_required_packages() {
     elif [ "$system_type" = "centos" ]; then
         yum -y update
         yum -y install wget unzip curl
+    elif [ "$system_type" = "archlinux" ]; then
+        pacman -Sy
+        pacman -S wget unzip curl
     else
         echo -e "${RED}不支持的系统类型${RESET}"
         exit 1
