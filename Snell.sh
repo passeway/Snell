@@ -1,6 +1,6 @@
 #!/bin/bash
 
-VERSION="v5.0.1"
+VERSION="v6.0.0b1"
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
@@ -34,16 +34,44 @@ wait_for_package_manager() {
 install_required_packages() {
     local system_type=$(get_system_type)
     echo -e "${GREEN}安装必要软件包${RESET}"
-    
+
     if [ "$system_type" = "debian" ]; then
         apt update
-        apt install -y wget unzip curl
+        apt install -y wget unzip curl libc-ares2
+
+        # Snell v6.0.0b1 依赖 OpenSSL 1.1
+        if ! ldconfig -p | grep -q "libcrypto.so.1.1"; then
+            echo -e "${YELLOW}检测到缺少 OpenSSL 1.1 运行库，正在安装兼容包${RESET}"
+
+            cd /tmp || exit 1
+
+            wget -q \
+            http://archive.ubuntu.com/ubuntu/pool/main/o/openssl1.1/libssl1.1_1.1.1f-1ubuntu2.24_amd64.deb \
+            -O libssl1.1.deb
+
+            if [ ! -s libssl1.1.deb ]; then
+                wget -q \
+                http://security.ubuntu.com/ubuntu/pool/main/o/openssl1.1/libssl1.1_1.1.1f-1ubuntu2.24_amd64.deb \
+                -O libssl1.1.deb
+            fi
+
+            if [ -s libssl1.1.deb ]; then
+                apt install -y ./libssl1.1.deb
+                rm -f libssl1.1.deb
+            else
+                echo -e "${RED}OpenSSL 1.1 安装失败${RESET}"
+                exit 1
+            fi
+        fi
+
     elif [ "$system_type" = "centos" ]; then
         yum -y update
-        yum -y install wget unzip curl
+        yum -y install wget unzip curl c-ares
+
     elif [ "$system_type" = "archlinux" ]; then
-        pacman -Sy
-        pacman -S wget unzip curl
+        pacman -Sy --noconfirm
+        pacman -S --noconfirm wget unzip curl c-ares
+
     else
         echo -e "${RED}不支持的系统类型${RESET}"
         exit 1
@@ -161,7 +189,7 @@ EOF
     IP_COUNTRY=$(curl -s http://ipinfo.io/${HOST_IP}/country)
     echo -e "${GREEN}Snell 示例配置，项目地址: https://github.com/passeway/Snell${RESET}"
     cat << EOF > /etc/snell/config.txt
-${IP_COUNTRY} = snell, ${HOST_IP}, ${RANDOM_PORT}, psk = ${RANDOM_PSK}, version = 5, reuse = true
+${IP_COUNTRY} = snell, ${HOST_IP}, ${RANDOM_PORT}, psk = ${RANDOM_PSK}, version = 6, reuse = true
 EOF
 
     cat /etc/snell/config.txt
