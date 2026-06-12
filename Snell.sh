@@ -1,6 +1,6 @@
 #!/bin/bash
 
-VERSION="v6.0.0b1"
+VERSION="v6.0.0b2"
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
