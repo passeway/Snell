@@ -280,7 +280,7 @@ show_menu() {
             echo "3. 启动 Snell 服务"
         fi
     fi
-    echo "4. 更新 Snell 服务"
+    echo "4. 更新 Snell 内核"
     echo "5. 重启 Snell 服务"
     echo "6. 查看 Snell 服务"
     echo "7. 查看 Snell 配置"
