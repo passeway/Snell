@@ -117,7 +117,7 @@ install_snell() {
     rm snell-server.zip
     chmod +x /usr/local/bin/snell-server
     RANDOM_PORT=$(shuf -i 30000-65000 -n 1)
-    RANDOM_PSK=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 20)
+    RANDOM_PSK=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 48)
 
     if ! id "snell" &>/dev/null; then
         useradd -r -s /usr/sbin/nologin snell
@@ -126,9 +126,9 @@ install_snell() {
     mkdir -p /etc/snell
     cat > /etc/snell/snell-server.conf << EOF
 [snell-server]
-listen = ::0:${RANDOM_PORT}
+listen = 0.0.0.0:${RANDOM_PORT}
 psk = ${RANDOM_PSK}
-ipv6 = true
+dns-ip-preference = ipv4-only
 EOF
 
     cat > /etc/systemd/system/snell.service << EOF
