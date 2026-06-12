@@ -32,43 +32,54 @@ wait_for_package_manager() {
 }
 
 install_required_packages() {
-    local system_type=$(get_system_type)
-
+    local system_type
+    system_type=$(get_system_type)
     echo -e "${GREEN}安装系统依赖${RESET}"
 
-    if [ "$system_type" = "debian" ]; then
-        apt update
-        apt install -y wget unzip curl libc-ares2 libuv1 libsodium23 libstdc++6 ca-certificates
+    case "$system_type" in
+        debian)
+            apt-get update || { echo -e "${RED}apt update 失败${RESET}"; return 1; }
+            apt-get install -y \
+                wget unzip curl \
+                libc-ares2 libuv1 libsodium23 libstdc++6 ca-certificates
 
-        cd /tmp || exit 1
-        wget -q http://archive.ubuntu.com/ubuntu/pool/main/o/openssl1.1/libssl1.1_1.1.1f-1ubuntu2.24_amd64.deb -O libssl1.1.deb
-
-        if [ ! -s libssl1.1.deb ]; then
-            wget -q http://security.ubuntu.com/ubuntu/pool/main/o/openssl1.1/libssl1.1_1.1.1f-1ubuntu2.24_amd64.deb -O libssl1.1.deb
-        fi
-
-        apt install -y ./libssl1.1.deb
-        rm -f libssl1.1.deb
-
-    elif [ "$system_type" = "centos" ]; then
-        yum -y update
-        yum -y install wget unzip curl c-ares libuv libsodium libstdc++
-
-    elif [ "$system_type" = "archlinux" ]; then
-        pacman -Sy --noconfirm
-        pacman -S --noconfirm wget unzip curl c-ares libuv libsodium gcc-libs
-
-    else
-        echo -e "${RED}不支持的系统类型${RESET}"
-        exit 1
-    fi
-}
-
-check_root() {
-    if [ "$(id -u)" != "0" ]; then
-        echo -e "${RED}请以 root 权限运行此脚本.${RESET}"
-        exit 1
-    fi
+            if ! ldconfig -p | grep -q "libcrypto.so.1.1"; then
+                echo -e "${YELLOW}检测到缺少 OpenSSL 1.1，尝试安装兼容包${RESET}"
+                local arch tmp deb
+                arch=$(dpkg --print-architecture)
+                local base="libssl1.1_1.1.1f-1ubuntu2.24_${arch}.deb"
+                local urls=(
+                    "http://archive.ubuntu.com/ubuntu/pool/main/o/openssl1.1/${base}"
+                    "http://security.ubuntu.com/ubuntu/pool/main/o/openssl1.1/${base}"
+                )
+                tmp=$(mktemp -d)
+                deb="${tmp}/libssl1.1.deb"
+                local installed=0
+                for url in "${urls[@]}"; do
+                    echo -e "${YELLOW}尝试下载: ${url}${RESET}"
+                    if wget -q --timeout=30 "$url" -O "$deb" && dpkg-deb -I "$deb" >/dev/null 2>&1; then
+                        apt-get install -y "$deb"
+                        installed=1
+                        break
+                    fi
+                done
+                rm -rf "$tmp"
+                [ "$installed" -eq 0 ] && echo -e "${YELLOW}libssl1.1 下载失败，跳过安装${RESET}"
+            fi
+            ;;
+        centos)
+            yum -y update || { echo -e "${RED}yum update 失败${RESET}"; return 1; }
+            yum -y install wget unzip curl c-ares libuv libsodium libstdc++
+            ;;
+        archlinux)
+            pacman -Sy --noconfirm || { echo -e "${RED}pacman 同步失败${RESET}"; return 1; }
+            pacman -S --noconfirm wget unzip curl c-ares libuv libsodium gcc-libs
+            ;;
+        *)
+            echo -e "${RED}不支持的系统类型: ${system_type}${RESET}"
+            return 1
+            ;;
+    esac
 }
 
 check_snell_installed() {
