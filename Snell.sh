@@ -34,7 +34,7 @@ wait_for_package_manager() {
 install_required_packages() {
     local system_type
     system_type=$(get_system_type)
-    echo -e "${GREEN}安装系统依赖${RESET}"
+    echo -e "${GREEN}安装必要系统依赖${RESET}"
 
     case "$system_type" in
         debian)
