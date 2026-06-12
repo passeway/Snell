@@ -128,7 +128,7 @@ install_snell() {
 [snell-server]
 listen = 0.0.0.0:${RANDOM_PORT}
 psk = ${RANDOM_PSK}
-dns-ip-preference = ipv4-only
+dns-ip-preference = default
 EOF
 
     cat > /etc/systemd/system/snell.service << EOF
