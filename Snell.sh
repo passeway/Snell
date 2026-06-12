@@ -21,6 +21,14 @@ get_system_type() {
     fi
 }
 
+
+check_root() {
+    if [ "$(id -u)" -ne 0 ]; then
+        echo -e "${RED}请以 root 权限运行此脚本${RESET}"
+        exit 1
+    fi
+}
+
 wait_for_package_manager() {
     local system_type=$(get_system_type)
     if [ "$system_type" = "debian" ]; then
