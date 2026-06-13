@@ -36,14 +36,14 @@ install_required_packages() {
     echo -e "${GREEN}安装必要软件包${RESET}"
     
     if [ "$system_type" = "debian" ]; then
-        apt update
+        apt update || { echo -e "${RED}apt update 失败${RESET}"; return 1; }
         apt install -y wget unzip curl
     elif [ "$system_type" = "centos" ]; then
-        yum -y update
+        yum -y update || { echo -e "${RED}yum update 失败${RESET}"; return 1; }
         yum -y install wget unzip curl
     elif [ "$system_type" = "archlinux" ]; then
-        pacman -Sy
-        pacman -S wget unzip curl
+        pacman -Sy --noconfirm || { echo -e "${RED}pacman 同步失败${RESET}"; return 1; }
+        pacman -S --noconfirm wget unzip curl
     else
         echo -e "${RED}不支持的系统类型${RESET}"
         exit 1
