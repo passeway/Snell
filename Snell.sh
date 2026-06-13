@@ -217,7 +217,7 @@ show_menu() {
 
     if [ $snell_installed -eq 0 ]; then
         installation_status="${GREEN}已安装${RESET}"
-        if version_output=$(/usr/local/bin/snell-server -version 2>&1); then
+        if version_output=$(/usr/local/bin/snell-server -v 2>&1); then
             snell_version=$(echo "$version_output" | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+')
             if [ -n "$snell_version" ]; then
                 version_status="${GREEN}${snell_version}${RESET}"
