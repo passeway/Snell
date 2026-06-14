@@ -255,8 +255,9 @@ show_menu() {
     fi
     echo "4. 更新 Snell 内核"
     echo "5. 重启 Snell 服务"
-    echo "6. 查看 Snell 服务"
-    echo "7. 查看 Snell 配置"
+    echo "6. 查看 Snell 状态"
+    echo "7. 查看 Snell 日志"
+    echo "8. 查看 Snell 配置"
     echo "0. 退出"
     echo -e "${GREEN}======================${RESET}"
     read -p "请输入选项编号: " choice
@@ -303,6 +304,9 @@ main() {
                 systemctl status snell --no-pager -l
                 ;;
             7)
+                journalctl -u snell -f -o cat
+                ;;
+            8)
                 if [ -f /etc/snell/config.txt ]; then
                     cat /etc/snell/config.txt
                 else
