@@ -300,7 +300,7 @@ main() {
                 systemctl restart snell
                 ;;
             6)
-                systemctl status snell
+                systemctl status snell --no-pager -l
                 ;;
             7)
                 if [ -f /etc/snell/config.txt ]; then
