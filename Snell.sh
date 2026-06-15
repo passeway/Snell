@@ -1,6 +1,6 @@
 #!/bin/bash
 
-VERSION="v6.0.0b2"
+VERSION="v6.0.0b3"
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
@@ -127,6 +127,7 @@ install_snell() {
     mkdir -p /etc/snell
     cat > /etc/snell/snell-server.conf << EOF
 [snell-server]
+mode = default
 listen = 0.0.0.0:${RANDOM_PORT}
 psk = ${RANDOM_PSK}
 dns-ip-preference = default
