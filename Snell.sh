@@ -163,7 +163,7 @@ EOF
     IP_COUNTRY=$(curl -s http://ipinfo.io/${HOST_IP}/country)
     echo -e "${GREEN}Snell 示例配置，项目地址: https://github.com/passeway/Snell${RESET}"
     cat << EOF > /etc/snell/config.txt
-${IP_COUNTRY} = snell, ${HOST_IP}, ${RANDOM_PORT}, psk = ${RANDOM_PSK}, version = 6, reuse = true
+${IP_COUNTRY} = snell, ${HOST_IP}, ${RANDOM_PORT}, psk=${RANDOM_PSK}, version=6, mode=default
 EOF
 
     cat /etc/snell/config.txt
