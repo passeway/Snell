@@ -143,7 +143,7 @@ Config file parameters ([snell-server]):
 
 ```
 
-## 项目地址：[https://kb.nssurge.com](https://kb.nssurge.com/surge-knowledge-base/zh/release-notes/snell)
+## 项目地址：https://kb.nssurge.com/surge-knowledge-base/release-notes/snell
 
 
 
