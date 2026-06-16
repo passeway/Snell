@@ -90,7 +90,7 @@ stop_snell() {
 }
 
 install_snell() {
-    echo -e "${GREEN}正在安装Snell${RESET}"
+    echo -e "${GREEN}正在安装 Snell${RESET}"
 
     wait_for_package_manager
     install_required_packages || {
