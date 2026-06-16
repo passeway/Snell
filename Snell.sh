@@ -308,8 +308,8 @@ main() {
                 journalctl -u snell -f -o cat
                 ;;
             8)
-                if [ -f /etc/snell/config.txt ]; then
-                    cat /etc/snell/config.txt
+                if [ -f /etc/snell/snell-client.conf ]; then
+                    cat /etc/snell/snell-client.conf
                 else
                     echo -e "${RED}配置文件不存在${RESET}"
                 fi
