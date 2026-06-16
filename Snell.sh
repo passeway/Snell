@@ -162,11 +162,11 @@ EOF
     HOST_IP=$(curl -s http://checkip.amazonaws.com)
     IP_COUNTRY=$(curl -s http://ipinfo.io/${HOST_IP}/country)
     echo -e "${GREEN}Snell 示例配置，项目地址: https://github.com/passeway/Snell${RESET}"
-    cat << EOF > /etc/snell/config.txt
+    cat << EOF > /etc/snell/snell-client.conf
 ${IP_COUNTRY} = snell, ${HOST_IP}, ${RANDOM_PORT}, psk=${RANDOM_PSK}, version=6, mode=default, reuse=true
 EOF
 
-    cat /etc/snell/config.txt
+    cat /etc/snell/snell-client.conf
 }
 
 update_snell() {
@@ -195,7 +195,7 @@ update_snell() {
     echo -e "${GREEN}Snell 更新成功${RESET}"
     sleep 3 && journalctl -u snell.service -n 8 --no-pager
     echo -e "${GREEN}Snell 示例配置，项目地址: https://github.com/passeway/Snell${RESET}"
-    cat /etc/snell/config.txt
+    cat /etc/snell/snell-client.conf
 }
 
 uninstall_snell() {
