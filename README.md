@@ -29,12 +29,13 @@ bash <(curl -fsSL snell-ten.vercel.app)
 
 ## 🌟 Key Features
 
-- **🚀 Extreme Performance**: Written in C, single binary with zero dependencies (except glibc).
-- **🛡️ v6 Stealth Protocol**: Moves away from TLS impersonation. Generates a deployment-specific protocol profile derived from your PSK (features 42 characteristic parameters and 13 traffic-shaping strategies).
-- **🔁 UDP over TCP**: Fully supports UDP traffic relay over TCP connections.
-- **🛠️ Service Management**: Built-in wizard for easy installation, uninstallation, starting, stopping, restarting, updating, and log viewing.
-- **🌐 Network Stack Control**: Explicitly supports dual-stack listening (IPv4/IPv6), customizable DNS IP preference, and egress interface binding.
-- **🐳 Docker Support**: Provides `Snell-docker.sh` for easy containerized deployments.
+Snell is a lean encrypted proxy protocol developed by our team. Here are some highlights:
+
+* Extreme performance.
+* Support UDP over TCP relay.
+* Single binary with zero dependencies. (except glibc)
+* A wizard to help you start.
+* Proxy server will report remote errors to the client if an error encounters. Clients may choose countermeasures for different scenarios.
 
 ## 📦 Supported Environments
 
