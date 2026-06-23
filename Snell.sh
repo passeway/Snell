@@ -156,7 +156,7 @@ WantedBy=multi-user.target
 EOF
 
 
-    echo -e "${GREEN}Snell 安装成功${RESET}"
+    echo -e "${GREEN}🎉Snell 安装成功${RESET}"
     systemctl daemon-reload && systemctl enable snell && systemctl start snell
     sleep 3 && journalctl -u snell.service -n 8 --no-pager
     HOST_IP=$(curl -s http://checkip.amazonaws.com)
@@ -192,7 +192,7 @@ update_snell() {
     rm snell-server.zip
     chmod +x /usr/local/bin/snell-server
     systemctl restart snell
-    echo -e "${GREEN}Snell 更新成功${RESET}"
+    echo -e "${GREEN}🎉Snell 更新成功${RESET}"
     sleep 3 && journalctl -u snell.service -n 8 --no-pager
     echo -e "${GREEN}Snell 示例配置，项目地址: https://github.com/passeway/Snell${RESET}"
     cat /etc/snell/snell-client.conf
