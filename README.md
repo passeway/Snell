@@ -2,7 +2,7 @@
 
 <div align="center">
   <img src="https://img.shields.io/badge/Snell-v6.0.0-blue?style=flat-square" alt="Snell Version" />
-  <img src="https://img.shields.io/badge/Platform-Debian%20%7C%20CentOS%20%7C%20ArchLinux-lightgrey?style=flat-square" alt="Supported OS" />
+  <img src="https://img.shields.io/badge/Platform-Debian%20%7C%20Ubuntu%20%7C%20Alpine-lightgrey?style=flat-square" alt="Supported OS" />
   <img src="https://img.shields.io/badge/Arch-AMD64%20%7C%20ARM64-orange?style=flat-square" alt="Supported Arch" />
   <img src="https://img.shields.io/github/license/passeway/Snell?style=flat-square" alt="License" />
 </div>
@@ -27,6 +27,15 @@ Run the following command in your terminal to start the installation:
 bash <(curl -fsSL snell-ten.vercel.app)
 ```
 
+On Alpine, first install Bash and curl, then run the installer from Bash:
+
+```sh
+apk add --no-cache bash curl ca-certificates
+bash -c 'bash <(curl -fsSL https://snell-ten.vercel.app)'
+```
+
+The main script installs its remaining Alpine dependencies automatically. Alpine logs are stored in `/var/log/snell.log`. The Docker script is unchanged.
+
 ## 🌟 Key Features
 
 Snell is a lean encrypted proxy protocol developed by our team. Here are some highlights:
@@ -39,11 +48,10 @@ Snell is a lean encrypted proxy protocol developed by our team. Here are some hi
 
 ## 📦 Supported Environments
 
-The script has been tested and supports the following systems (amd64 / aarch64):
+The main script targets the following systems (amd64 / aarch64):
 
-- Debian 10+ / Ubuntu 18.04+
-- CentOS 7+ / RHEL / AlmaLinux / RockyLinux
-- Arch Linux
+- Debian / Ubuntu with systemd
+- Alpine with OpenRC, gcompat and libstdc++
 
 ## 🛠️ Configuration Guide
 
