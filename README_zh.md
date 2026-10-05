@@ -52,6 +52,18 @@ bash -c 'bash <(curl -fsSL https://snell-ten.vercel.app)'
 - Debian / Ubuntu：使用 systemd
 - Alpine：使用 OpenRC、gcompat 和 libstdc++
 
+## 日常维护
+
+- 安装或更新时设置配置权限：服务端配置为 `root:snell 640`，客户端配置为 `root:root 600`。
+- 菜单 **8** 根据当前服务端配置重新生成客户端配置，同步端口、PSK 和 mode，并保留已有有效 IPv4 地址和节点名。修改服务端配置后，仍需重启服务使改动生效。
+- 公网 IPv4 查询使用 HTTPS、连接/总时限和备用接口；全部失败时可手动输入，留空取消后可从菜单 **8** 重试。
+- Alpine 每小时检查 `/var/log/snell.log`：超过 1 MiB 时轮转，最多保留 3 份压缩历史日志。检查间隔内日志仍可继续增长。配置位于 `/etc/snell/logrotate.conf`，使用 `copytruncate` 保持日志文件可继续写入（复制与截断之间有极小的日志丢失窗口）。
+- 查看实时日志时按 **Ctrl+C** 返回菜单。
+
+已有安装运行新版脚本后，选择 **4（更新 Snell 内核）** 应用日志轮转及配置权限设置。更新不创建二进制备份。
+
+开发检查：`python3 -m unittest discover -s tests -v`。GitHub Actions 在 Debian、Ubuntu、Alpine 容器中执行语法和回归检查；测试使用临时目录和模拟服务命令，不替代 VPS 端到端测试。
+
 ## 🛠️ 常用配置
 
 服务端配置文件路径：`/etc/snell/snell-server.conf`
@@ -72,5 +84,3 @@ egress-interface = eth0            # (可选) 绑定出口网卡
 ## 📚 项目引用
 - 官方发布说明：[Snell V6 Release Notes](https://kb.nssurge.com/surge-knowledge-base/zh/release-notes/snell)
 - Snell 是由 [Surge 团队](https://kb.nssurge.com/surge-knowledge-base) 开发的轻量级代理协议。
-
-
