@@ -2,7 +2,7 @@
 
 <div align="center">
   <img src="https://img.shields.io/badge/Snell-v6.0.0-blue?style=flat-square" alt="Snell Version" />
-  <img src="https://img.shields.io/badge/Platform-Debian%20%7C%20CentOS%20%7C%20ArchLinux-lightgrey?style=flat-square" alt="Supported OS" />
+  <img src="https://img.shields.io/badge/Platform-Debian%20%7C%20Ubuntu%20%7C%20Alpine-lightgrey?style=flat-square" alt="Supported OS" />
   <img src="https://img.shields.io/badge/Arch-AMD64%20%7C%20ARM64-orange?style=flat-square" alt="Supported Arch" />
   <img src="https://img.shields.io/github/license/passeway/Snell?style=flat-square" alt="License" />
 </div>
@@ -27,6 +27,15 @@
 bash <(curl -fsSL snell-ten.vercel.app)
 ```
 
+Alpine 请先安装 Bash 和 curl，再从 Bash 启动脚本：
+
+```sh
+apk add --no-cache bash curl ca-certificates
+bash -c 'bash <(curl -fsSL https://snell-ten.vercel.app)'
+```
+
+主脚本会自动安装 Alpine 其余依赖，日志位于 `/var/log/snell.log`。Docker 脚本保持原样。
+
 ## 🌟 核心特性
 
 - **🚀 极致性能**：C 语言编写，单文件运行，除 glibc 外零依赖。
@@ -38,11 +47,10 @@ bash <(curl -fsSL snell-ten.vercel.app)
 
 ## 📦 支持环境
 
-脚本经过测试，支持以下系统环境（amd64 / aarch64）：
+主脚本适配以下系统环境（amd64 / aarch64）：
 
-- Debian 10+ / Ubuntu 18.04+
-- CentOS 7+ / RHEL / AlmaLinux / RockyLinux
-- Arch Linux
+- Debian / Ubuntu：使用 systemd
+- Alpine：使用 OpenRC、gcompat 和 libstdc++
 
 ## 🛠️ 常用配置
 
