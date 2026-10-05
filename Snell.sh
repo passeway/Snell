@@ -31,13 +31,191 @@ install_required_packages() {
     echo -e "${GREEN}安装必要软件包${RESET}"
     case "$(get_system_type)" in
         debian|ubuntu)
-            apt-get update && apt-get -o DPkg::Lock::Timeout=120 install -y wget unzip curl ca-certificates
+            apt-get update && apt-get -o DPkg::Lock::Timeout=120 install -y wget unzip curl ca-certificates iproute2
             ;;
         alpine)
-            apk add --no-cache bash wget unzip curl ca-certificates coreutils openrc gcompat libstdc++
+            apk add --no-cache bash wget unzip curl ca-certificates coreutils openrc gcompat libstdc++ iproute2 logrotate busybox-initscripts
             ;;
         *) echo -e "${RED}仅支持 Debian、Ubuntu 和 Alpine${RESET}"; return 1 ;;
     esac
+}
+
+fail() {
+    echo -e "${RED}$*${RESET}" >&2
+    return 1
+}
+
+# 同目录暂存后替换，避免磁盘满时留下被截断的配置；不保留备份。
+write_file() (
+    local destination="$1" permissions="$2" owner="$3" temporary
+    temporary=$(mktemp "${destination}.tmp.XXXXXX") || return 1
+    trap 'rm -f "$temporary"' EXIT
+    trap 'exit 1' INT TERM
+    if ! { cat > "$temporary" &&
+        chown "$owner" "$temporary" &&
+        chmod "$permissions" "$temporary" &&
+        mv -f "$temporary" "$destination"; }; then
+        fail "写入文件或设置权限失败: $destination"
+        return 1
+    fi
+)
+
+secure_config_files() {
+    if [ -f /etc/snell/snell-server.conf ]; then
+        chown root:snell /etc/snell/snell-server.conf &&
+            chmod 640 /etc/snell/snell-server.conf || return 1
+    fi
+    if [ -f /etc/snell/snell-client.conf ]; then
+        chown root:root /etc/snell/snell-client.conf &&
+            chmod 600 /etc/snell/snell-client.conf || return 1
+    fi
+}
+
+configure_log_rotation() {
+    [ "$(get_system_type)" = alpine ] || return 0
+    mkdir -p /etc/snell /etc/periodic/hourly /var/lib/logrotate || return 1
+    # 私有配置和状态文件，避免与发行版每天轮转全部日志的任务重复处理。
+    write_file /etc/snell/logrotate.conf 644 root:root <<'ROTATE' || return 1
+/var/log/snell.log {
+    size 1M
+    rotate 3
+    compress
+    missingok
+    notifempty
+    copytruncate
+    su root snell
+}
+ROTATE
+    write_file /etc/periodic/hourly/snell-logrotate 755 root:root <<'CRON' || return 1
+#!/bin/sh
+exec /usr/sbin/logrotate -s /var/lib/logrotate/snell.status /etc/snell/logrotate.conf
+CRON
+    rc-update add crond default || return 1
+    if ! rc-service crond status >/dev/null 2>&1; then
+        rc-service crond start || return 1
+    fi
+}
+
+valid_ipv4() {
+    local octet
+    local -a octets
+    [[ "$1" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] || return 1
+    IFS=. read -r -a octets <<< "$1"
+    for octet in "${octets[@]}"; do
+        (( 10#$octet <= 255 )) || return 1
+    done
+    [ "$1" != 0.0.0.0 ]
+}
+
+fetch_text() {
+    curl -4fsS --connect-timeout 3 --max-time 8 "$1"
+}
+
+get_public_ip() {
+    local endpoint address
+    for endpoint in https://checkip.amazonaws.com https://api.ipify.org https://ipv4.icanhazip.com; do
+        address=$(fetch_text "$endpoint" 2>/dev/null) || continue
+        address=${address//$'\r'/}
+        address=${address//$'\n'/}
+        if valid_ipv4 "$address"; then
+            printf '%s\n' "$address"
+            return 0
+        fi
+    done
+    echo "自动获取公网 IPv4 失败，请填写客户端连接地址。" >&2
+    while read -r -p "公网 IPv4（留空取消）: " address; do
+        [ -n "$address" ] || return 1
+        if valid_ipv4 "$address"; then
+            printf '%s\n' "$address"
+            return 0
+        fi
+        echo "IPv4 地址无效，请重新输入。" >&2
+    done
+    return 1
+}
+
+get_country() {
+    local country
+    country=$(fetch_text "https://ipinfo.io/$1/country" 2>/dev/null) || country=""
+    country=${country//$'\r'/}
+    country=${country//$'\n'/}
+    if [[ "$country" =~ ^[A-Z]{2}$ ]]; then
+        printf '%s\n' "$country"
+    else
+        echo Snell
+    fi
+}
+
+config_value() {
+    awk -v key="$1" '
+        /^[[:space:]]*\[/ {
+            section=$0
+            sub(/[[:space:]]*[#;].*$/, "", section)
+            gsub(/[[:space:]]/, "", section)
+            active=(section == "[snell-server]")
+            next
+        }
+        active && /^[[:space:]]*[^#;][^=]*=/ {
+            name=$0; sub(/=.*/, "", name)
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", name)
+            if (name == key) {
+                value=$0; sub(/^[^=]*=/, "", value)
+                sub(/[[:space:]]+[#;].*$/, "", value)
+                gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
+                found=1
+            }
+        }
+        END { if (found) print value; else exit 1 }
+    ' /etc/snell/snell-server.conf
+}
+
+refresh_client_config() {
+    local listen port psk mode address="" label=""
+    [ -f /etc/snell/snell-server.conf ] || { fail "服务端配置不存在"; return 1; }
+    listen=$(config_value listen) && psk=$(config_value psk) || {
+        fail "服务端配置缺少 listen 或 psk"; return 1;
+    }
+    listen=${listen%%,*}
+    listen=${listen//[[:space:]]/}
+    port=${listen##*:}
+    [[ "$port" =~ ^[0-9]{1,5}$ ]] && (( 10#$port >= 1 && 10#$port <= 65535 )) &&
+        [ -n "$psk" ] || { fail "服务端端口或 PSK 无效"; return 1; }
+    mode=$(config_value mode) || mode=default
+    case "$mode" in
+        default|unshaped|unsafe-raw) ;;
+        *) fail "服务端 mode 无效"; return 1 ;;
+    esac
+    # 已有公网地址和节点名保留；端口、PSK、mode 始终从当前服务端配置读取。
+    if [ -f /etc/snell/snell-client.conf ]; then
+        address=$(awk -F, 'NR==1 { gsub(/[[:space:]]/, "", $2); print $2 }' /etc/snell/snell-client.conf)
+        label=$(awk -F= 'NR==1 { gsub(/^[[:space:]]+|[[:space:]]+$/, "", $1); print $1 }' /etc/snell/snell-client.conf)
+    fi
+    if ! valid_ipv4 "$address"; then
+        address=$(get_public_ip) || { fail "服务已安装，但客户端地址未填写；可通过菜单 8 重试"; return 1; }
+    fi
+    if [ -z "$label" ] || [[ "$label" == *,* || "$label" == *$'\n'* ]]; then
+        label=$(get_country "$address")
+    fi
+    write_file /etc/snell/snell-client.conf 600 root:root <<EOF || {
+${label} = snell, ${address}, ${port}, psk=${psk}, version=6, mode=${mode}, reuse=true
+EOF
+        fail "写入客户端配置失败"; return 1;
+    }
+    cat /etc/snell/snell-client.conf
+}
+
+choose_port() {
+    local port listeners attempt
+    # 包含 IPv4/IPv6 的 TCP 监听端口；监听失败仍由后续服务启动检查处理。
+    listeners=$(ss -H -ltn) || { fail "无法检查端口占用"; return 1; }
+    for ((attempt=0; attempt<100; attempt++)); do
+        port=$(shuf -i 30000-65000 -n 1) || return 1
+        if ! awk -v port="$port" '$4 ~ (":" port "$") {found=1} END {exit !found}' <<< "$listeners"; then
+            printf '%s\n' "$port"
+            return 0
+        fi
+    done
+    fail "未找到可用的随机 TCP 端口"
 }
 
 service_action() {
@@ -49,14 +227,24 @@ service_action() {
 }
 
 show_logs() {
-    if [ "$(get_system_type)" = alpine ]; then
-        if [ "$1" = follow ]; then
-            tail -n 50 -f /var/log/snell.log
-        else
-            tail -n 8 /var/log/snell.log
-        fi
-    elif [ "$1" = follow ]; then
-        journalctl -u snell -f -o cat
+    if [ "$1" = follow ]; then
+        # 父进程仅在查看日志期间忽略 Ctrl+C，子进程恢复默认信号处理。
+        local result
+        trap ':' INT
+        (
+            trap - INT
+            if [ "$(get_system_type)" = alpine ]; then
+                exec tail -n 50 -F /var/log/snell.log
+            else
+                exec journalctl -u snell -f -o cat
+            fi
+        )
+        result=$?
+        trap 'echo -e "${RED}已取消操作${RESET}"; exit 130' INT
+        [ "$result" -eq 130 ] && return 0
+        return "$result"
+    elif [ "$(get_system_type)" = alpine ]; then
+        tail -n 8 /var/log/snell.log
     else
         journalctl -u snell -n 8 --no-pager
     fi
@@ -141,19 +329,23 @@ install_snell() {
     get_architecture >/dev/null || return 1
     install_required_packages || return 1
     replace_snell_binary || return 1
-    RANDOM_PORT=$(shuf -i 30000-65000 -n 1)
-    RANDOM_PSK=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 48)
+    RANDOM_PORT=$(choose_port) || return 1
+    RANDOM_PSK=$(LC_ALL=C tr -dc A-Za-z0-9 </dev/urandom | head -c 48)
+    [ "${#RANDOM_PSK}" -eq 48 ] || { fail "生成 PSK 失败"; return 1; }
 
     if ! id "snell" &>/dev/null; then
         if [ "$(get_system_type)" = alpine ]; then
-            addgroup -S snell && adduser -S -D -H -s /sbin/nologin -G snell snell || return 1
+            if ! getent group snell >/dev/null; then
+                addgroup -S snell || { fail "创建 snell 用户组失败"; return 1; }
+            fi
+            adduser -S -D -H -s /sbin/nologin -G snell snell || { fail "创建 snell 用户失败"; return 1; }
         else
-            useradd -r -s /usr/sbin/nologin snell || return 1
+            useradd -r -s /usr/sbin/nologin snell || { fail "创建 snell 用户失败"; return 1; }
         fi
     fi
 
-    mkdir -p /etc/snell
-    cat > /etc/snell/snell-server.conf << EOF
+    mkdir -p /etc/snell || { fail "创建配置目录失败"; return 1; }
+    write_file /etc/snell/snell-server.conf 640 root:snell << EOF || return 1
 [snell-server]
 mode = default
 listen = 0.0.0.0:${RANDOM_PORT}
@@ -162,7 +354,7 @@ dns-ip-preference = default
 EOF
 
     if [ "$(get_system_type)" = alpine ]; then
-        cat > /etc/init.d/snell << 'OPENRC'
+        write_file /etc/init.d/snell 755 root:root << 'OPENRC' || return 1
 #!/sbin/openrc-run
 name="Snell Proxy Service"
 command="/usr/local/bin/snell-server"
@@ -183,10 +375,9 @@ start_pre() {
     checkpath --file --mode 0640 --owner snell:snell /var/log/snell.log
 }
 OPENRC
-        chmod 755 /etc/init.d/snell || return 1
         rc-update add snell default || return 1
     else
-    cat > /etc/systemd/system/snell.service << EOF
+    write_file /etc/systemd/system/snell.service 644 root:root << EOF || return 1
 [Unit]
 Description=Snell Proxy Service
 After=network.target
@@ -211,17 +402,13 @@ EOF
 
         systemctl daemon-reload && systemctl enable snell || return 1
     fi
-    restart_snell || { echo -e "${RED}Snell 安装后启动失败${RESET}"; return 1; }
-    echo -e "${GREEN}🎉Snell 安装成功${RESET}"
+    configure_log_rotation || { fail "配置日志轮转失败"; return 1; }
+    restart_snell || { fail "Snell 安装后启动失败"; return 1; }
+    echo -e "${GREEN}Snell 服务已启动${RESET}"
     show_logs recent
-    HOST_IP=$(curl -s http://checkip.amazonaws.com)
-    IP_COUNTRY=$(curl -s http://ipinfo.io/${HOST_IP}/country)
     echo -e "${GREEN}Snell 示例配置，项目地址: https://github.com/passeway/Snell${RESET}"
-    cat << EOF > /etc/snell/snell-client.conf
-${IP_COUNTRY} = snell, ${HOST_IP}, ${RANDOM_PORT}, psk=${RANDOM_PSK}, version=6, mode=default, reuse=true
-EOF
-
-    cat /etc/snell/snell-client.conf
+    refresh_client_config || return 1
+    echo -e "${GREEN}🎉Snell 安装成功${RESET}"
 }
 
 update_snell() {
@@ -233,6 +420,8 @@ update_snell() {
     echo -e "${GREEN}Snell 正在更新${RESET}"
     get_architecture >/dev/null || return 1
     install_required_packages || return 1
+    secure_config_files || { fail "设置配置文件权限失败"; return 1; }
+    configure_log_rotation || { fail "配置日志轮转失败"; return 1; }
     replace_snell_binary || return 1
     restart_snell || {
         echo -e "${RED}新程序已替换，但重启失败；请查看日志。未创建备份。${RESET}"
@@ -241,7 +430,7 @@ update_snell() {
     echo -e "${GREEN}🎉Snell 更新成功${RESET}"
     show_logs recent
     echo -e "${GREEN}Snell 示例配置，项目地址: https://github.com/passeway/Snell${RESET}"
-    cat /etc/snell/snell-client.conf
+    refresh_client_config
 }
 
 uninstall_snell() {
@@ -251,14 +440,13 @@ uninstall_snell() {
     fi
     if [ "$(get_system_type)" = alpine ]; then
         rc-update del snell default || return 1
-        rm -f /etc/init.d/snell
+        rm -f /etc/init.d/snell /etc/periodic/hourly/snell-logrotate || return 1
+        rm -f /var/lib/logrotate/snell.status || return 1
     else
         systemctl disable snell || return 1
-        rm -f /etc/systemd/system/snell.service
-        systemctl daemon-reload
+        rm -f /etc/systemd/system/snell.service && systemctl daemon-reload || return 1
     fi
-    rm /usr/local/bin/snell-server
-    rm -rf /etc/snell
+    rm /usr/local/bin/snell-server && rm -rf /etc/snell || { fail "清理 Snell 文件失败"; return 1; }
     echo -e "${GREEN}Snell 卸载成功${RESET}"
 }
 
@@ -314,12 +502,12 @@ show_menu() {
     echo "8. 查看 Snell 配置"
     echo "0. 退出"
     echo -e "${GREEN}======================${RESET}"
-    read -p "请输入选项编号: " choice
+    read -r -p "请输入选项编号: " choice || return 1
     export choice
     echo ""
 }
 
-trap 'echo -e "${RED}已取消操作${RESET}"; exit' INT
+trap 'echo -e "${RED}已取消操作${RESET}"; exit 130' INT
 
 main() {
     check_root
@@ -329,7 +517,7 @@ main() {
     fi
 
     while true; do
-        show_menu
+        show_menu || return 0
         case "${choice}" in
             1)
                 install_snell
@@ -369,11 +557,7 @@ main() {
                 show_logs follow
                 ;;
             8)
-                if [ -f /etc/snell/snell-client.conf ]; then
-                    cat /etc/snell/snell-client.conf
-                else
-                    echo -e "${RED}配置文件不存在${RESET}"
-                fi
+                refresh_client_config
                 ;;
             0)
                 echo -e "${GREEN}已退出 Snell 管理工具${RESET}"
@@ -383,7 +567,7 @@ main() {
                 echo -e "${RED}无效的选项${RESET}"
                 ;;
         esac
-        read -p "按 enter 键继续..."
+        read -r -p "按 enter 键继续..." || return 0
     done
 }
 

@@ -53,6 +53,18 @@ The main script targets the following systems (amd64 / aarch64):
 - Debian / Ubuntu with systemd
 - Alpine with OpenRC, gcompat and libstdc++
 
+## Maintenance
+
+- Install/update applies `root:snell 640` to the server configuration and `root:root 600` to the client configuration.
+- Menu **8** regenerates the client entry from the current server port, PSK and mode, preserving its existing valid IPv4 address and node name. Restart the service after editing the server configuration to activate changes.
+- Public IPv4 lookup uses HTTPS, connection/total timeouts and fallback providers. If all providers fail, enter the address manually; cancel with an empty line and retry from menu **8**.
+- On Alpine, an hourly job rotates `/var/log/snell.log` when it exceeds 1 MiB, retaining up to 3 compressed archives. The log can grow between checks. Configuration lives at `/etc/snell/logrotate.conf`; `copytruncate` keeps the log writable, with a small possible loss window between copying and truncation.
+- Press **Ctrl+C** in live logs to return to the menu.
+
+For existing installations, run the latest script and choose **4 (update)** to apply log rotation and configuration permissions. Binary updates do not create backups.
+
+Developer checks: `python3 -m unittest discover -s tests -v`. GitHub Actions runs syntax and regression checks in Debian, Ubuntu and Alpine containers. Tests use temporary directories and mocked service commands; they do not replace end-to-end VPS tests.
+
 ## 🛠️ Configuration Guide
 
 Server config file path: `/etc/snell/snell-server.conf`
@@ -73,5 +85,3 @@ egress-interface = eth0            # (Optional) Bind outgoing sockets to an inte
 ## 📚 References
 - Official Release Notes: [Snell V6 Release Notes](https://kb.nssurge.com/surge-knowledge-base/release-notes/snell)
 - Snell is a lightweight proxy protocol developed by the [Surge Team](https://kb.nssurge.com/surge-knowledge-base).
-
-
