@@ -10,7 +10,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        image: [debian:bookworm-slim, ubuntu:24.04, alpine:3.22]
+        image: [debian:bookworm-slim, ubuntu:24.04, alpine:3.22, alpine:edge]
     steps:
       - uses: actions/checkout@v4
       - name: Download official cores for interoperability checks
@@ -33,6 +33,11 @@ jobs:
             else
               apt-get update
               apt-get install -y --no-install-recommends bash python3 coreutils iproute2 logrotate curl
+            fi
+            bash -c "source ./Snell.sh; install_required_packages"
+            if command -v apk >/dev/null; then
+              test -x /etc/init.d/crond
+              command -v crond
             fi
             bash -n Snell.sh
             bash -n Snell-docker.sh
