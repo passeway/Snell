@@ -1,35 +1,67 @@
 <div align="center">
 
-# Snell
+# Snell v6
 
-### Simple deployment. Clear control.
+### One key. A distinct traffic profile.
 
-Snell v6 installation and management for Debian · Ubuntu · Alpine.
+**Deployment diversity · Low overhead · Built for Surge**
 
+Bring Snell v6 to your server with a simple deployment.<br>
+Installation and management for Debian, Ubuntu and Alpine.
+
+![Snell](https://img.shields.io/badge/Snell-v6-635BFF?style=flat-square)
+![Linux](https://img.shields.io/badge/Linux-Debian%20%7C%20Ubuntu%20%7C%20Alpine-18181B?style=flat-square)
+![Architecture](https://img.shields.io/badge/Arch-AMD64%20%7C%20ARM64-18181B?style=flat-square)
 [![Checks](https://github.com/passeway/Snell/actions/workflows/check.yml/badge.svg?branch=main)](https://github.com/passeway/Snell/actions/workflows/check.yml)
-![Platform](https://img.shields.io/badge/Linux-Debian%20%7C%20Ubuntu%20%7C%20Alpine-2563eb?style=flat-square)
-![Architecture](https://img.shields.io/badge/Arch-AMD64%20%7C%20ARM64-475569?style=flat-square)
-[![License](https://img.shields.io/github/license/passeway/Snell?style=flat-square)](LICENSE)
 
 **English** · [简体中文](README_zh.md)
 
-[Quick start](#quick-start) · [Service management](#service-management) · [Client configuration](#client-configuration) · [Report an issue](https://github.com/passeway/Snell/issues)
+[Protocol advantages](#protocol-advantages) · [Quick start](#quick-start) · [Connect with Surge](#connect-with-surge) · [Service management](#service-management)
 
 </div>
 
 ---
 
-Install, start, stop and update Snell from one interactive menu. The script adapts to systemd or OpenRC and generates a proxy entry for Surge.
+## Protocol advantages
 
-| Deploy | Manage | Connect |
-| :--- | :--- | :--- |
-| Debian, Ubuntu and Alpine | Start, stop, restart and update | Generated Surge proxy entry |
-| AMD64 and ARM64 | Installation, runtime and version status | Random port and PSK |
-| Automatic dependency installation | Service status and live logs | Export from the current server configuration |
+### Traffic profiles that vary by deployment
+
+**Deployment-level protocol diversity is the defining change in Snell v6.** The PSK determines framing, padding and packet-size behavior automatically. Different keys produce different traffic profiles, making classification by a shared fingerprint harder.
+
+| 42 profile parameters | 13 shaping strategy categories | Derived from your PSK |
+| :---: | :---: | :---: |
+| Define protocol behavior | Combine into distinct profiles | No manual profile tuning |
+
+Explore the design in the [Surge team's Snell v6 introduction](https://nssurge.com/blog/snell-v6/).
+
+### Less overhead. More connection detail.
+
+v6 retains Snell's focus on performance and compatibility:
+
+| Capability | Practical value |
+| :--- | :--- |
+| **0-RTT design** | PSK authentication reduces proxy connection setup round trips |
+| **Connection reuse and full TCP semantics** | Preserves behavior such as half-close for application compatibility |
+| **Precise error reporting** | Helps Surge distinguish authentication problems from destination failures |
+| **UDP over TCP** | Relays UDP through the TCP connection, simplifying inbound firewall rules |
+| **Flexible network controls** | DNS address-family preferences and multiple listening addresses |
+
+See the [official release notes](https://kb.nssurge.com/surge-knowledge-base/release-notes/snell) for protocol and mode details. Multiple listening addresses are configurable in the core; this installer listens on IPv4 by default.
+
+## From protocol to deployment
+
+**Connect using your server IP, port and PSK. No domain or certificate setup is required.**
+
+- **Ready after installation**: dependencies, a random port, a 48-character random PSK and a Surge proxy entry are prepared for you.
+- **Three Linux systems**: systemd on Debian / Ubuntu and OpenRC on Alpine, with AMD64 and ARM64 support.
+- **One management menu**: installation, service controls, logs and client configuration export.
+- **Verified outcomes**: binary execution and service-state checks, with the running or stopped state preserved during updates.
+
+> The installer currently downloads the official **v6.0.0rc2** test release. It uses `mode=default` with AES encryption and traffic shaping. Your client must support Snell v6 and use the same mode as the server.
 
 ## Quick start
 
-Run as **root**. The script currently downloads **v6.0.0rc2**; the server version output may report **v6.0.0**.
+Run as **root**.
 
 ### Debian / Ubuntu
 
@@ -41,110 +73,77 @@ bash <(curl -fsSL snell-ten.vercel.app)
 
 ### Alpine
 
-Install the command dependencies first:
-
 ```sh
 apk add --no-cache bash curl ca-certificates
 bash -c 'bash <(curl -fsSL https://snell-ten.vercel.app)'
 ```
 
-**Run the script → Choose `1` → Allow the generated TCP port → Copy the proxy entry into Surge.**
+**Run the script → Choose `1` → Allow the generated TCP port → Connect with Surge.**
 
-> [!IMPORTANT]
-> Allow the actual listening TCP port in both your cloud security group and server firewall. Snell carries UDP relay traffic over TCP; an additional UDP firewall opening is not required for this relay.
+Allow the actual listening port in both your cloud security group and server firewall. v6 relays UDP over TCP; no additional inbound UDP port is required for that relay.
 
-## Supported environments
+## Connect with Surge
 
-| System | Service manager | Architecture |
-| :--- | :--- | :--- |
-| Debian | systemd | AMD64 / ARM64 |
-| Ubuntu | systemd | AMD64 / ARM64 |
-| Alpine | OpenRC | AMD64 / ARM64 |
-
-The main script installs Alpine dependencies including `gcompat` and `libstdc++`. This support matrix applies to the main installer.
-
-## Service management
-
-Run the installation command again to open the menu. Once installed, option `3` switches between start and stop according to the service state.
-
-| Option | Action |
-| :---: | :--- |
-| `1` | Install Snell |
-| `2` | Stop and verify the service, then uninstall Snell |
-| `3` | Start or stop the service |
-| `4` | Update the Snell binary, preserving the running or stopped state |
-| `5` | Restart the service |
-| `6` | View service status |
-| `7` | Follow logs; press `Ctrl+C` to return to the menu |
-| `8` | Regenerate and display the client entry from the current server configuration |
-| `0` | Exit |
-
-## Client configuration
-
-Copy the generated entry into the `[Proxy]` section of your Surge configuration:
+Copy the generated proxy entry into the `[Proxy]` section of your Surge configuration:
 
 ```ini
 [Proxy]
 My-Snell = snell, YOUR_SERVER_IP, YOUR_PORT, psk=YOUR_PSK, version=6, mode=default, reuse=true
 ```
 
-Replace the address, port and PSK placeholders with the actual values. Your client must support Snell v6.
+The address, port and PSK above are placeholders. Use the actual entry printed after installation.
 
-- Option **8** reads the current port, PSK and `mode`, preserving an existing valid IPv4 address and node name.
-- Public IPv4 lookup uses timeouts and fallback providers. If all providers fail, enter the address manually; leave it empty to cancel and retry with option **8**.
-- After editing the server configuration, restart with option **5**, then export with option **8**. Server and client modes must match.
+Option **8** reads the current server port, PSK and mode while preserving the existing valid address and node name. After editing the server configuration, restart with **5**, then export with **8**.
 
-### Common paths
+## Service management
 
-| Path | Purpose |
-| :--- | :--- |
-| `/usr/local/bin/snell-server` | Server binary |
-| `/etc/snell/snell-server.conf` | Server configuration |
-| `/etc/snell/snell-client.conf` | Generated Surge proxy entry |
+Run the installation command again to open the menu.
 
-Server configuration permissions are `root:snell 640`; client configuration permissions are `root:root 600`.
-
-## Troubleshooting
+| Option | Action |
+| :---: | :--- |
+| `1` | Install Snell |
+| `2` | Stop and verify the service, then uninstall |
+| `3` | Start or stop, according to the current state |
+| `4` | Update the binary, preserving the running or stopped state |
+| `5` | Restart and check the result |
+| `6` | View service status |
+| `7` | Follow logs; `Ctrl+C` returns to the menu |
+| `8` | Regenerate and display the Surge proxy entry |
+| `0` | Exit |
 
 <details>
-<summary><strong>Debian / Ubuntu · systemd</strong></summary>
+<summary><strong>Connection problems? Check these first.</strong></summary>
+
+Confirm that the service is running, its TCP port is allowed, and the client address, port, PSK, version and mode match the server.
+
+Debian / Ubuntu:
 
 ```bash
 systemctl status snell --no-pager
 journalctl -u snell -n 50 --no-pager
 ```
 
-</details>
-
-<details>
-<summary><strong>Alpine · OpenRC</strong></summary>
+Alpine:
 
 ```sh
 rc-service snell status
 tail -n 50 /var/log/snell.log
 ```
 
-Logs are checked hourly and rotated above 1 MiB, retaining up to 3 compressed archives. Settings are stored in `/etc/snell/logrotate.conf`. Logs can grow between checks; `copytruncate` has a small possible loss window between copying and truncation.
+If automatic public IPv4 lookup fails, enter it manually or cancel and retry with option **8**. If country lookup fails, the default node name is `Snell`.
+
+For bug reports, include your OS, architecture, server and client versions, and relevant logs. Redact the PSK.
 
 </details>
 
-| Symptom | Check first |
-| :--- | :--- |
-| Connection timeout | Service status, listening port, cloud security group and local firewall |
-| Connection fails after editing settings | Address, port, PSK, version and mode; restart and regenerate the client entry |
-| Public address lookup fails | Enter the public IPv4 address manually and regenerate with option `8` |
-
-When reporting an issue, include the OS, CPU architecture, server and client versions, and relevant logs. Redact your PSK.
-
-Automated checks run syntax, failure-path regression tests, and real Snell v6 proxy traffic with an independent client in Debian, Ubuntu and Alpine containers. Service manager operations are mocked; local proxy tests do not replace end-to-end validation on your VPS.
-
 ---
+
+**Continuously checked** · Three-system CI covers failure-path regressions, log rotation and real proxy traffic through the official Snell v6 server. Service manager commands are mocked; validate your actual network path on your own deployment.
 
 <div align="center">
 
-Snell is developed by the [Surge Team](https://kb.nssurge.com/surge-knowledge-base) · This repository is an independent installation and management script project.
+Protocol by the **Surge team** · This project focuses on Linux installation and management
 
-[Official release notes](https://kb.nssurge.com/surge-knowledge-base/release-notes/snell) · [Report an issue](https://github.com/passeway/Snell/issues) · [View checks](https://github.com/passeway/Snell/actions)
+[Inside Snell v6](https://nssurge.com/blog/snell-v6/) · [Official release notes](https://kb.nssurge.com/surge-knowledge-base/release-notes/snell) · [Report an issue](https://github.com/passeway/Snell/issues)
 
 </div>
-

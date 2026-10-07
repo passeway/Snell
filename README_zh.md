@@ -1,35 +1,67 @@
 <div align="center">
 
-# Snell
+# Snell v6
 
-### 轻量部署，从容管理。
+### 一份密钥，一种流量特征。
 
-面向 Debian · Ubuntu · Alpine 的 Snell v6 安装与管理脚本。
+**部署级协议多样性 · 低开销连接 · Surge 原生体验**
 
+让 Snell v6 的协议能力，落在一次简洁的部署中。<br>
+面向 Debian、Ubuntu 与 Alpine 的安装与管理工具。
+
+![Snell](https://img.shields.io/badge/Snell-v6-635BFF?style=flat-square)
+![Linux](https://img.shields.io/badge/Linux-Debian%20%7C%20Ubuntu%20%7C%20Alpine-18181B?style=flat-square)
+![Architecture](https://img.shields.io/badge/Arch-AMD64%20%7C%20ARM64-18181B?style=flat-square)
 [![Checks](https://github.com/passeway/Snell/actions/workflows/check.yml/badge.svg?branch=main)](https://github.com/passeway/Snell/actions/workflows/check.yml)
-![Platform](https://img.shields.io/badge/Linux-Debian%20%7C%20Ubuntu%20%7C%20Alpine-2563eb?style=flat-square)
-![Architecture](https://img.shields.io/badge/Arch-AMD64%20%7C%20ARM64-475569?style=flat-square)
-[![License](https://img.shields.io/github/license/passeway/Snell?style=flat-square)](LICENSE)
 
 [English](README.md) · **简体中文**
 
-[快速开始](#快速开始) · [日常管理](#日常管理) · [客户端配置](#客户端配置) · [问题反馈](https://github.com/passeway/Snell/issues)
+[协议优势](#协议优势) · [快速部署](#快速部署) · [接入 Surge](#接入-surge) · [日常管理](#日常管理)
 
 </div>
 
 ---
 
-一个交互菜单，完成 Snell 服务的安装、启停、更新和配置查看。自动适配 systemd 与 OpenRC，为 Surge 生成可直接复制的代理条目。
+## 协议优势
 
-| 部署 | 管理 | 连接 |
-| :--- | :--- | :--- |
-| Debian、Ubuntu、Alpine | 服务启停、重启与内核更新 | 自动生成 Surge 代理条目 |
-| AMD64、ARM64 | 安装状态、运行状态与版本展示 | 随机端口与 PSK |
-| 自动安装所需依赖 | 状态查询与实时日志 | 从当前服务端配置重新导出 |
+### 协议特征，随部署而不同
 
-## 快速开始
+**部署级协议多样性是 Snell v6 的核心升级。** 客户端与服务端根据 PSK 自动派生协议特征，改变分帧、填充和包长分布。使用不同 PSK 的部署呈现不同的流量特征，提高依靠统一协议指纹进行分类的成本。
 
-以 **root** 身份运行。脚本当前下载版本为 **v6.0.0rc2**，服务端版本输出可能显示为 **v6.0.0**。
+| 42 个特征参数 | 13 类填充与流量整形策略 | PSK 自动派生 |
+| :---: | :---: | :---: |
+| 描述协议行为 | 组合形成不同流量特征 | 无需手动调节底层参数 |
+
+这一设计来自 [Surge 团队对 Snell v6 的介绍](https://nssurge.com/blog/snell-v6/)。
+
+### 低开销，同时保留连接细节
+
+v6 延续了 Snell 的性能与兼容性设计：
+
+| 能力 | 实际价值 |
+| :--- | :--- |
+| **0-RTT 协议设计** | 使用预共享密钥，减少代理层建立连接所需的往返 |
+| **连接复用与完整 TCP 语义** | 保留半关闭等连接行为，兼顾复用与应用兼容性 |
+| **准确的错误反馈** | 区分认证失败与目标连接失败，帮助 Surge 判断节点状态 |
+| **UDP over TCP** | 通过 TCP 连接承载 UDP 转发，简化入口端口放行 |
+| **更灵活的网络控制** | 支持 DNS 地址族偏好和多地址监听，适配不同出口环境 |
+
+协议设计与模式说明见[官方发布说明](https://kb.nssurge.com/surge-knowledge-base/release-notes/snell)。其中多地址监听属于内核可配置能力，本脚本默认监听 IPv4。
+
+## 把能力变成简单的部署
+
+**准备好一台 VPS，即可使用服务器 IP、端口与 PSK 接入，无需准备域名或证书。**
+
+- **开箱即用**：自动安装依赖，生成随机端口与 48 位随机 PSK，输出 Surge 代理条目。
+- **适配三种系统**：Debian / Ubuntu 使用 systemd，Alpine 使用 OpenRC；支持 AMD64 与 ARM64。
+- **集中管理**：安装、启停、重启、日志与配置导出，在同一个菜单完成。
+- **结果可核实**：检查内核运行能力与服务状态，更新保留原有启停状态。
+
+> 当前下载官方 **v6.0.0rc2** 测试版本，默认使用 `mode=default`，启用 AES 加密与流量整形。客户端需支持 Snell v6，服务端与客户端的 `mode` 必须一致。
+
+## 快速部署
+
+使用 **root** 用户执行。
 
 ### Debian / Ubuntu
 
@@ -41,110 +73,77 @@ bash <(curl -fsSL snell-ten.vercel.app)
 
 ### Alpine
 
-首次运行先安装命令依赖：
-
 ```sh
 apk add --no-cache bash curl ca-certificates
 bash -c 'bash <(curl -fsSL https://snell-ten.vercel.app)'
 ```
 
-**运行脚本 → 选择 `1` 安装 → 放行生成的 TCP 端口 → 复制代理条目至 Surge。**
+**运行脚本 → 选择 `1` → 放行生成的 TCP 端口 → 导入 Surge。**
 
-> [!IMPORTANT]
-> 云安全组和服务器防火墙需要放行实际监听的 TCP 端口。Snell 通过 TCP 承载 UDP 转发，无需为此额外开放同端口 UDP。
+云安全组和系统防火墙均需放行实际监听端口。v6 使用 TCP 承载 UDP 转发，无需为此额外开放同端口 UDP。
 
-## 支持环境
+## 接入 Surge
 
-| 系统 | 服务管理 | 架构 |
-| :--- | :--- | :--- |
-| Debian | systemd | AMD64 / ARM64 |
-| Ubuntu | systemd | AMD64 / ARM64 |
-| Alpine | OpenRC | AMD64 / ARM64 |
-
-Alpine 所需的 `gcompat`、`libstdc++` 等依赖由主脚本安装。上述支持范围针对主安装脚本。
-
-## 日常管理
-
-重新运行安装命令即可打开菜单。安装后，选项 `3` 会根据运行状态显示启动或停止。
-
-| 选项 | 操作 |
-| :---: | :--- |
-| `1` | 安装 Snell 服务 |
-| `2` | 停止并确认服务已停后卸载 |
-| `3` | 启动或停止服务 |
-| `4` | 更新 Snell 内核，保留原有启停状态 |
-| `5` | 重启 Snell 服务 |
-| `6` | 查看 Snell 状态 |
-| `7` | 查看实时日志，按 `Ctrl+C` 返回菜单 |
-| `8` | 根据当前服务端配置重新生成并查看客户端条目 |
-| `0` | 退出 |
-
-## 客户端配置
-
-安装完成后，复制脚本输出的代理条目，放入 Surge 配置的 `[Proxy]` 部分：
+将脚本输出的代理条目放入 Surge 配置的 `[Proxy]` 部分：
 
 ```ini
 [Proxy]
 My-Snell = snell, YOUR_SERVER_IP, YOUR_PORT, psk=YOUR_PSK, version=6, mode=default, reuse=true
 ```
 
-示例中的地址、端口和 PSK 均为占位符，请替换为实际值；客户端需支持 Snell v6。
+示例中的地址、端口和 PSK 为占位符，安装后直接复制实际输出即可。
 
-- 菜单 **8** 同步服务端的端口、PSK 和 `mode`，保留已有有效 IPv4 地址和节点名。
-- 公网 IPv4 查询包含超时控制和备用接口；全部失败时可手动输入，留空取消后可从菜单 **8** 重试。
-- 修改服务端配置后，先选择 **5** 重启，再选择 **8** 重新导出。服务端与客户端的 `mode` 需保持一致。
+菜单 **8** 从当前服务端配置重新读取端口、PSK 和模式，并保留已有有效地址与节点名。修改服务端配置后，先选择 **5** 重启，再选择 **8** 导出。
 
-### 常用路径
+## 日常管理
 
-| 路径 | 用途 |
-| :--- | :--- |
-| `/usr/local/bin/snell-server` | Snell 服务端程序 |
-| `/etc/snell/snell-server.conf` | 服务端配置 |
-| `/etc/snell/snell-client.conf` | 生成的 Surge 代理条目 |
+再次运行安装命令，即可打开管理菜单。
 
-服务端配置权限为 `root:snell 640`，客户端配置权限为 `root:root 600`。
-
-## 排查问题
+| 选项 | 功能 |
+| :---: | :--- |
+| `1` | 安装 Snell 服务 |
+| `2` | 停止并确认服务已停后卸载 |
+| `3` | 根据运行状态显示启动或停止 |
+| `4` | 更新内核，保留原有启停状态 |
+| `5` | 重启服务并检查运行结果 |
+| `6` | 查看服务状态 |
+| `7` | 查看实时日志，`Ctrl+C` 返回菜单 |
+| `8` | 重新生成并查看 Surge 代理条目 |
+| `0` | 退出 |
 
 <details>
-<summary><strong>Debian / Ubuntu · systemd</strong></summary>
+<summary><strong>连接异常时，先检查这几项</strong></summary>
+
+确认服务正在运行，TCP 端口已放行，客户端的地址、端口、PSK、版本和模式与服务端一致。
+
+Debian / Ubuntu：
 
 ```bash
 systemctl status snell --no-pager
 journalctl -u snell -n 50 --no-pager
 ```
 
-</details>
-
-<details>
-<summary><strong>Alpine · OpenRC</strong></summary>
+Alpine：
 
 ```sh
 rc-service snell status
 tail -n 50 /var/log/snell.log
 ```
 
-日志每小时检查一次，超过 1 MiB 时轮转，最多保留 3 份压缩归档。轮转配置位于 `/etc/snell/logrotate.conf`。检查间隔内日志仍可能增长，`copytruncate` 存在短暂的复制与截断丢日志窗口。
+公网 IPv4 自动查询失败时，可手动输入；取消后可通过菜单 **8** 重试。国家信息不可用时，节点名称默认使用 `Snell`。
+
+反馈问题时请附上系统、架构、服务端与客户端版本及错误日志，并隐藏 PSK。
 
 </details>
 
-| 现象 | 优先检查 |
-| :--- | :--- |
-| 客户端连接超时 | 服务状态、监听端口、云安全组和本机防火墙 |
-| 更改配置后无法连接 | 地址、端口、PSK、版本和模式是否一致；是否已重启并重新导出 |
-| 公网地址获取失败 | 手动输入服务器公网 IPv4，再通过菜单 `8` 生成条目 |
-
-反馈问题时请提供系统、CPU 架构、服务端与客户端版本和相关日志，并隐藏 PSK。
-
-自动检查在 Debian、Ubuntu、Alpine 容器中执行语法、失败场景回归测试，以及官方 Snell v6 内核与独立客户端的真实代理传输测试。服务管理操作使用模拟命令，本地代理测试不替代你的 VPS 端到端验证。
-
 ---
+
+**持续验证** · 三系统 CI 覆盖失败场景回归、日志轮转和官方 Snell v6 的真实代理传输。服务管理命令使用隔离模拟；实际线路表现需在部署环境中验证。
 
 <div align="center">
 
-Snell 协议由 [Surge 团队](https://kb.nssurge.com/surge-knowledge-base) 开发 · 本仓库为独立安装与管理脚本项目
+协议由 **Surge 团队** 开发 · 本项目专注 Linux 安装与管理
 
-[官方发布说明](https://kb.nssurge.com/surge-knowledge-base/zh/release-notes/snell) · [提交问题](https://github.com/passeway/Snell/issues) · [查看检查结果](https://github.com/passeway/Snell/actions)
+[Snell v6 技术介绍](https://nssurge.com/blog/snell-v6/) · [官方发布说明](https://kb.nssurge.com/surge-knowledge-base/release-notes/snell) · [反馈问题](https://github.com/passeway/Snell/issues)
 
 </div>
-
