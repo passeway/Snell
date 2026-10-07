@@ -28,6 +28,8 @@ class SnellTests(unittest.TestCase):
         os_release.write_text('ID=debian\n')
         self.code = self.code.replace('/etc/os-release', str(os_release))
         self.code += '\nchown() { printf "%s\\n" "$*" >> "' + str(self.root / 'owners') + '"; }\n'
+        # Keep download fixtures as shell functions; timeout itself is exercised separately.
+        self.code += '\ntimeout() { [ "$1" != -k ] || shift 2; shift; "$@"; }\n'
         self.server = self.root / 'etc/snell/snell-server.conf'
         self.client = self.root / 'etc/snell/snell-client.conf'
         self.binary = self.root / 'usr/local/bin/snell-server'
@@ -53,9 +55,12 @@ class SnellTests(unittest.TestCase):
         self.run_shell('uname() { echo armv7l; }; get_architecture', expected=1)
 
     def test_ip_validation(self):
-        for address in ['8.218.121.94', '203.0.113.7']:
+        for address in ['8.218.121.94', '203.0.113.7', '192.168.1.10', '223.255.255.254']:
             self.run_shell(f'valid_ipv4 {address}')
-        for address in ['', '0.0.0.0', '999.1.1.1', '1.2.3', '<html>error</html>', '1.2.3.4,psk=x']:
+        for address in ['', '0.0.0.0', '0.1.2.3', '127.0.0.1', '127.255.255.254',
+                        '0127.0.0.1', '169.254.2.3', '224.0.0.1', '239.255.255.250',
+                        '240.0.0.1', '255.255.255.255', '999.1.1.1', '1.2.3',
+                        '<html>error</html>', '1.2.3.4,psk=x']:
             self.run_shell('valid_ipv4 "$candidate"', expected=1) if address == '' else self.run_shell(
                 'candidate=' + repr(address) + '; valid_ipv4 "$candidate"', expected=1)
 
@@ -152,7 +157,8 @@ choose_port
 
     def test_failed_restart_not_reported_as_update_success(self):
         self.binary.write_text('original')
-        result = self.run_shell('''install_required_packages() { :; }; secure_config_files() { :; }
+        result = self.run_shell('''check_snell_running() { return 0; }
+install_required_packages() { :; }; secure_config_files() { :; }
 configure_log_rotation() { :; }; replace_snell_binary() { :; }; restart_snell() { return 1; }
 update_snell''', expected=1)
         self.assertNotIn('更新成功', result.stdout)
@@ -218,9 +224,107 @@ install_snell''', expected=1)
         self.assertEqual(cron.stat().st_mode & 0o777, 0o755)
         subprocess.run(['sh', '-n', str(cron)], check=True)
         self.binary.write_text('original')
-        self.run_shell('get_system_type() { echo alpine; }; check_snell_running() { return 1; }; rc-update() { :; }; uninstall_snell')
+        self.run_shell('get_system_type() { echo alpine; }; rc-service() { [ "$2" != status ] || return 3; }; rc-update() { :; }; uninstall_snell')
         self.assertFalse(cron.exists())
         self.assertFalse(config.exists())
+
+    def test_start_and_stop_command_failures_return_nonzero(self):
+        for operation in ('start_snell', 'restart_snell', 'stop_snell'):
+            result = self.run_shell('service_action() { return 1; }; show_logs() { echo FAILURE_LOG; }; ' + operation, expected=1)
+            self.assertNotIn('成功', result.stdout)
+            self.assertIn('FAILURE_LOG', result.stderr)
+
+    def test_start_checks_survival_and_reports_early_exit(self):
+        result = self.run_shell('''service_action() { :; }; sleep() { :; }; show_logs() { :; }
+checks=0
+check_snell_running() { checks=$((checks+1)); [ "$checks" -eq 1 ]; }
+start_snell''', expected=1)
+        self.assertNotIn('启动成功', result.stdout)
+
+    def test_start_allows_delayed_start_and_requires_stable_status(self):
+        result = self.run_shell('''service_action() { :; }; sleep() { :; }
+checks=0
+check_snell_running() { checks=$((checks+1)); [ "$checks" -ge 3 ]; }
+start_snell && printf 'checks=%s\\n' "$checks"''')
+        self.assertIn('启动成功', result.stdout)
+        self.assertIn('checks=5', result.stdout)
+
+    def test_stop_requires_explicit_stopped_status(self):
+        for state in ('active', 'activating', 'deactivating', 'reloading', '', 'unknown'):
+            result = self.run_shell(f'''service_action() {{ :; }}; sleep() {{ :; }}; show_logs() {{ :; }}
+systemctl() {{ echo '{state}'; }}; stop_snell''', expected=1)
+            self.assertNotIn('停止成功', result.stdout)
+        self.run_shell('service_action() { :; }; sleep() { :; }; show_logs() { :; }; systemctl() { return 1; }; stop_snell', expected=1)
+        for state in ('inactive', 'failed'):
+            self.run_shell(f'service_action() {{ :; }}; systemctl() {{ echo {state}; }}; stop_snell')
+
+    def test_openrc_stopped_status_codes(self):
+        for code in (0, 1, 3, 4, 8, 16, 32, 64):
+            self.run_shell(f'get_system_type() {{ echo alpine; }}; rc-service() {{ return {code}; }}; check_snell_stopped', expected=0 if code == 3 else 1)
+
+    def test_uninstall_stops_transitional_services_before_deleting(self):
+        for system in ('debian', 'alpine'):
+            self.binary.write_text('old-core'); self.server_config()
+            result = self.run_shell(f'''get_system_type() {{ echo {system}; }}
+check_snell_running() {{ return 1; }}
+service_action() {{ echo ACTION:"$1"; state=stopped; }}
+check_snell_stopped() {{ [ "$state" = stopped ]; }}
+rc-update() {{ :; }}; systemctl() {{ :; }}
+uninstall_snell''')
+            self.assertIn('ACTION:stop', result.stdout)
+            self.assertFalse(self.binary.exists()); self.assertFalse(self.server.exists())
+            self.server.parent.mkdir(parents=True, exist_ok=True)
+
+    def test_uninstall_keeps_files_if_stop_fails_or_cannot_be_confirmed(self):
+        self.binary.write_text('old-core'); self.server_config()
+        for command_result in (0, 1):
+            result = self.run_shell(f'''service_action() {{ return {command_result}; }}
+check_snell_stopped() {{ return 1; }}; sleep() {{ :; }}; show_logs() {{ :; }}
+systemctl() {{ echo UNEXPECTED_DISABLE; }}; uninstall_snell''', expected=1)
+            self.assertNotIn('UNEXPECTED_DISABLE', result.stdout)
+            self.assertEqual(self.binary.read_text(), 'old-core')
+            self.assertTrue(self.server.exists())
+
+    def test_update_preserves_stopped_or_running_state_and_credentials(self):
+        for running in (0, 1):
+            self.binary.write_text('old-core'); self.server_config()
+            before = self.server.read_bytes()
+            result = self.run_shell(f'''check_snell_running() {{ return {0 if running else 1}; }}
+check_snell_stopped() {{ return {1 if running else 0}; }}
+install_required_packages() {{ :; }}; configure_log_rotation() {{ :; }}
+replace_snell_binary() {{ echo REPLACED; }}; restart_snell() {{ echo RESTARTED; }}
+show_logs() {{ :; }}; refresh_client_config() {{ :; }}; update_snell''')
+            self.assertIn('REPLACED', result.stdout)
+            self.assertEqual('RESTARTED' in result.stdout, bool(running))
+            self.assertEqual(self.server.read_bytes(), before)
+
+    def test_update_does_not_modify_files_on_unknown_or_transitional_state(self):
+        self.binary.write_text('old-core'); self.server_config()
+        result = self.run_shell('''check_snell_running() { return 1; }; check_snell_stopped() { return 1; }
+install_required_packages() { echo UNEXPECTED_DEPENDENCIES; }
+replace_snell_binary() { echo UNEXPECTED_REPLACE; }; update_snell''', expected=1)
+        self.assertNotIn('UNEXPECTED', result.stdout)
+        self.assertEqual(self.binary.read_text(), 'old-core')
+
+    def test_download_timeout_keeps_binary_and_cleans_staging(self):
+        self.binary.write_text('old-core')
+        result = self.run_shell('timeout() { printf "BOUND:%s\\n" "$*"; return 124; }; replace_snell_binary', expected=1)
+        self.assertIn('BOUND:-k 5 180 wget --timeout=15 --tries=3', result.stdout)
+        self.assertEqual(self.binary.read_text(), 'old-core')
+        self.assertFalse(list(self.binary.parent.glob('.snell-install.*')))
+
+    def test_real_version_probe_timeout(self):
+        self.binary.write_text('#!/bin/sh\nexec sleep 30\n'); self.binary.chmod(0o755)
+        start = time.monotonic()
+        self.run_shell(f'unset -f timeout; snell_binary_version "{self.binary}" 0.2', expected=124)
+        self.assertLess(time.monotonic() - start, 4)
+
+    def test_invalid_saved_address_is_not_reused(self):
+        self.server_config()
+        self.client.write_text('HK = snell, 127.0.0.1, 12345, psk=old\n')
+        result = self.run_shell('get_public_ip() { echo 203.0.113.10; }; refresh_client_config')
+        self.assertIn('203.0.113.10', result.stdout)
+        self.assertNotIn('127.0.0.1', result.stdout)
 
     @unittest.skipUnless(shutil.which('logrotate') and os.geteuid() == 0, 'requires logrotate and root')
     def test_real_rotation_keeps_open_log_and_limits_archives(self):

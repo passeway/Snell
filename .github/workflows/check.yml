@@ -13,18 +13,28 @@ jobs:
         image: [debian:bookworm-slim, ubuntu:24.04, alpine:3.22]
     steps:
       - uses: actions/checkout@v4
-      - name: Check syntax and regression behavior
+      - name: Download official cores for interoperability checks
+        run: |
+          source ./Snell.sh
+          mkdir -p "$RUNNER_TEMP/snell-cores"
+          timeout -k 5 180 wget --timeout=15 --tries=3 --waitretry=2 "https://dl.nssurge.com/snell/snell-server-${VERSION}-linux-amd64.zip" -O "$RUNNER_TEMP/snell-cores/snell.zip"
+          unzip -o "$RUNNER_TEMP/snell-cores/snell.zip" snell-server -d "$RUNNER_TEMP/snell-cores"
+          # Pin the independent test client; this does not set the installed Snell version.
+          curl -fL --retry 2 --connect-timeout 10 --max-time 180 https://github.com/SagerNet/sing-box/releases/download/v1.14.2/sing-box-1.14.2-linux-amd64.tar.gz -o "$RUNNER_TEMP/snell-cores/client.tar.gz"
+          tar -xzf "$RUNNER_TEMP/snell-cores/client.tar.gz" -C "$RUNNER_TEMP/snell-cores" --strip-components=1 sing-box-1.14.2-linux-amd64/sing-box
+          chmod 755 "$RUNNER_TEMP/snell-cores/snell-server" "$RUNNER_TEMP/snell-cores/sing-box"
+      - name: Check syntax, regression behavior and real proxy traffic
         env:
           TEST_IMAGE: ${{ matrix.image }}
         run: |
-          docker run --rm -v "$GITHUB_WORKSPACE:/repo:ro" -w /repo "$TEST_IMAGE" sh -ec '
+          docker run --rm -v "$GITHUB_WORKSPACE:/repo:ro" -v "$RUNNER_TEMP/snell-cores:/core:ro" -e SNELL_TEST_BINARY=/core/snell-server -e SING_BOX_TEST_BINARY=/core/sing-box -w /repo "$TEST_IMAGE" sh -ec '
             if command -v apk >/dev/null; then
-              apk add --no-cache bash python3 coreutils iproute2 logrotate
+              apk add --no-cache bash python3 coreutils iproute2 logrotate curl gcompat libstdc++
             else
               apt-get update
-              apt-get install -y --no-install-recommends bash python3 coreutils iproute2 logrotate
+              apt-get install -y --no-install-recommends bash python3 coreutils iproute2 logrotate curl
             fi
             bash -n Snell.sh
             bash -n Snell-docker.sh
-            python3 -m unittest discover -s tests -v
+            PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -v
           '

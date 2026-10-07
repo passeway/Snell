@@ -70,9 +70,9 @@ Run the installation command again to open the menu. Once installed, option `3` 
 | Option | Action |
 | :---: | :--- |
 | `1` | Install Snell |
-| `2` | Uninstall Snell |
+| `2` | Stop and verify the service, then uninstall Snell |
 | `3` | Start or stop the service |
-| `4` | Update the Snell binary |
+| `4` | Update the Snell binary, preserving the running or stopped state |
 | `5` | Restart the service |
 | `6` | View service status |
 | `7` | Follow logs; press `Ctrl+C` to return to the menu |
@@ -136,7 +136,7 @@ Logs are checked hourly and rotated above 1 MiB, retaining up to 3 compressed ar
 
 When reporting an issue, include the OS, CPU architecture, server and client versions, and relevant logs. Redact your PSK.
 
-Automated checks run syntax and regression tests in Debian, Ubuntu and Alpine containers. Service commands are mocked; these tests do not replace end-to-end VPS validation.
+Automated checks run syntax, failure-path regression tests, and real Snell v6 proxy traffic with an independent client in Debian, Ubuntu and Alpine containers. Service manager operations are mocked; local proxy tests do not replace end-to-end validation on your VPS.
 
 ---
 
@@ -147,3 +147,4 @@ Snell is developed by the [Surge Team](https://kb.nssurge.com/surge-knowledge-ba
 [Official release notes](https://kb.nssurge.com/surge-knowledge-base/release-notes/snell) · [Report an issue](https://github.com/passeway/Snell/issues) · [View checks](https://github.com/passeway/Snell/actions)
 
 </div>
+
