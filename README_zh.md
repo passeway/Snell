@@ -70,9 +70,9 @@ Alpine 所需的 `gcompat`、`libstdc++` 等依赖由主脚本安装。上述支
 | 选项 | 操作 |
 | :---: | :--- |
 | `1` | 安装 Snell 服务 |
-| `2` | 卸载 Snell 服务 |
+| `2` | 停止并确认服务已停后卸载 |
 | `3` | 启动或停止服务 |
-| `4` | 更新 Snell 内核 |
+| `4` | 更新 Snell 内核，保留原有启停状态 |
 | `5` | 重启 Snell 服务 |
 | `6` | 查看 Snell 状态 |
 | `7` | 查看实时日志，按 `Ctrl+C` 返回菜单 |
@@ -136,7 +136,7 @@ tail -n 50 /var/log/snell.log
 
 反馈问题时请提供系统、CPU 架构、服务端与客户端版本和相关日志，并隐藏 PSK。
 
-自动检查在 Debian、Ubuntu、Alpine 容器中执行语法与回归测试；服务操作使用模拟命令，不替代真实 VPS 的端到端验证。
+自动检查在 Debian、Ubuntu、Alpine 容器中执行语法、失败场景回归测试，以及官方 Snell v6 内核与独立客户端的真实代理传输测试。服务管理操作使用模拟命令，本地代理测试不替代你的 VPS 端到端验证。
 
 ---
 
@@ -147,3 +147,4 @@ Snell 协议由 [Surge 团队](https://kb.nssurge.com/surge-knowledge-base) 开�
 [官方发布说明](https://kb.nssurge.com/surge-knowledge-base/zh/release-notes/snell) · [提交问题](https://github.com/passeway/Snell/issues) · [查看检查结果](https://github.com/passeway/Snell/actions)
 
 </div>
+

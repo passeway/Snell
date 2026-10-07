@@ -31,7 +31,7 @@ install_required_packages() {
     echo -e "${GREEN}安装必要软件包${RESET}"
     case "$(get_system_type)" in
         debian|ubuntu)
-            apt-get update && apt-get -o DPkg::Lock::Timeout=120 install -y wget unzip curl ca-certificates iproute2
+            apt-get update && apt-get -o DPkg::Lock::Timeout=120 install -y wget unzip curl ca-certificates iproute2 coreutils
             ;;
         alpine)
             apk add --no-cache bash wget unzip curl ca-certificates coreutils openrc gcompat libstdc++ iproute2 logrotate busybox-initscripts
@@ -104,7 +104,9 @@ valid_ipv4() {
     for octet in "${octets[@]}"; do
         (( 10#$octet <= 255 )) || return 1
     done
-    [ "$1" != 0.0.0.0 ]
+    # 保留可手动使用的内网地址，排除未指定、回环、链路本地、组播及保留地址。
+    (( 10#${octets[0]} > 0 && 10#${octets[0]} != 127 && 10#${octets[0]} < 224 )) || return 1
+    ! (( 10#${octets[0]} == 169 && 10#${octets[1]} == 254 ))
 }
 
 fetch_text() {
@@ -258,28 +260,23 @@ replace_snell_binary() (
     stage=$(mktemp -d /usr/local/bin/.snell-install.XXXXXX) || return 1
     trap 'rm -rf "$stage"' EXIT
     trap 'exit 1' INT TERM
-    wget "https://dl.nssurge.com/snell/snell-server-${VERSION}-linux-${architecture}.zip" -O "$stage/snell.zip" || {
-        echo -e "${RED}下载 Snell 失败${RESET}"; return 1;
+    timeout -k 5 180 wget --timeout=15 --tries=3 --waitretry=2 \
+        "https://dl.nssurge.com/snell/snell-server-${VERSION}-linux-${architecture}.zip" -O "$stage/snell.zip" || {
+        echo -e "${RED}下载 Snell 失败或超时${RESET}"; return 1;
     }
     unzip -o "$stage/snell.zip" snell-server -d "$stage" || {
         echo -e "${RED}解压 Snell 失败${RESET}"; return 1;
     }
     chmod 755 "$stage/snell-server" || return 1
-    "$stage/snell-server" -v || {
-        echo -e "${RED}新程序无法运行，请检查架构和运行依赖${RESET}"; return 1;
+    snell_binary_version "$stage/snell-server" || {
+        echo -e "${RED}新程序无法运行或检查超时，请检查架构和运行依赖${RESET}"; return 1;
     }
     mv -f "$stage/snell-server" /usr/local/bin/snell-server
 )
 
-restart_snell() {
-    service_action restart || return 1
-    sleep 3
-    check_snell_running || {
-        echo -e "${RED}Snell 启动后未保持运行，请查看日志${RESET}"
-        show_logs recent
-        return 1
-    }
-}
+snell_binary_version() { timeout -k 2 "${2:-10}" "$1" -v; }
+
+restart_snell() { start_snell_checked restart; }
 
 check_root() {
     if [ "$(id -u)" != "0" ]; then
@@ -305,22 +302,56 @@ check_snell_running() {
     fi
 }
 
-start_snell() {
-    service_action start
-    if [ $? -eq 0 ]; then
-        echo -e "${GREEN}Snell 启动成功${RESET}"
+# 与“不是 active”区分：正在启停和查询失败都不算已经停止。
+check_snell_stopped() {
+    local state result
+    if [ "$(get_system_type)" = alpine ]; then
+        if rc-service snell status >/dev/null 2>&1; then result=0; else result=$?; fi
+        # OpenRC 的 3 表示 stopped；4/8/16/32 等状态不能据此确认停机。
+        [ "$result" -eq 3 ]
     else
-        echo -e "${RED}Snell 启动失败${RESET}"
+        state=$(systemctl show snell.service --property=ActiveState --value) || return 1
+        case "$state" in inactive|failed) return 0 ;; *) return 1 ;; esac
     fi
 }
 
-stop_snell() {
-    service_action stop
-    if [ $? -eq 0 ]; then
-        echo -e "${GREEN}Snell 停止成功${RESET}"
-    else
-        echo -e "${RED}Snell 停止失败${RESET}"
+wait_snell_state() {
+    local desired="$1" attempt stable=0
+    for ((attempt=0; attempt<8; attempt++)); do
+        if [ "$desired" = stopped ]; then
+            check_snell_stopped && return 0
+        else
+            # 连续三次检查，避免把命令成功或短暂启动当成持续运行。
+            sleep 1
+            if check_snell_running; then stable=$((stable+1)); else stable=0; fi
+            (( stable >= 3 )) && return 0
+            continue
+        fi
+        sleep 1
+    done
+    return 1
+}
+
+start_snell_checked() {
+    if ! service_action "$1" || ! wait_snell_state running; then
+        fail "Snell 启动或重启失败，服务未保持运行，请查看日志"
+        show_logs recent >&2
+        return 1
     fi
+}
+
+start_snell() {
+    start_snell_checked start || return 1
+    echo -e "${GREEN}Snell 启动成功${RESET}"
+}
+
+stop_snell() {
+    if ! service_action stop || ! wait_snell_state stopped; then
+        fail "Snell 停止失败或无法确认已经停止，保留现有文件"
+        show_logs recent >&2
+        return 1
+    fi
+    echo -e "${GREEN}Snell 停止成功${RESET}"
 }
 
 install_snell() {
@@ -412,6 +443,7 @@ EOF
 }
 
 update_snell() {
+    local was_running=0
     if [ ! -f "/usr/local/bin/snell-server" ]; then
         echo -e "${YELLOW}Snell 未安装，跳过更新${RESET}"
         return
@@ -419,25 +451,34 @@ update_snell() {
 
     echo -e "${GREEN}Snell 正在更新${RESET}"
     get_architecture >/dev/null || return 1
+    if check_snell_running; then
+        was_running=1
+    elif ! check_snell_stopped; then
+        fail "服务正在切换状态或无法确认状态，请稍后重试更新"
+        return 1
+    fi
     install_required_packages || return 1
     secure_config_files || { fail "设置配置文件权限失败"; return 1; }
     configure_log_rotation || { fail "配置日志轮转失败"; return 1; }
     replace_snell_binary || return 1
-    restart_snell || {
-        echo -e "${RED}新程序已替换，但重启失败；请查看日志。未创建备份。${RESET}"
-        return 1
-    }
+    if (( was_running )); then
+        restart_snell || {
+            echo -e "${RED}新程序已替换，但重启失败；请查看日志。未创建备份。${RESET}"
+            return 1
+        }
+    else
+        echo -e "${GREEN}服务保持停止状态，可通过菜单 3 启动${RESET}"
+    fi
     echo -e "${GREEN}🎉Snell 更新成功${RESET}"
-    show_logs recent
+    if (( was_running )); then show_logs recent; fi
     echo -e "${GREEN}Snell 示例配置，项目地址: https://github.com/passeway/Snell${RESET}"
     refresh_client_config
 }
 
 uninstall_snell() {
     echo -e "${GREEN}正在卸载 Snell${RESET}"
-    if check_snell_running; then
-        service_action stop || return 1
-    fi
+    # 无论当前处于启动、重启还是停止状态，都先执行停止并核实结果。
+    stop_snell || return 1
     if [ "$(get_system_type)" = alpine ]; then
         rc-update del snell default || return 1
         rm -f /etc/init.d/snell /etc/periodic/hourly/snell-logrotate || return 1
@@ -459,7 +500,7 @@ show_menu() {
 
     if [ $snell_installed -eq 0 ]; then
         installation_status="${GREEN}已安装${RESET}"
-        if version_output=$(/usr/local/bin/snell-server -v 2>&1); then
+        if version_output=$(snell_binary_version /usr/local/bin/snell-server 3 2>&1); then
             snell_version=$(echo "$version_output" | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+')
             if [ -n "$snell_version" ]; then
                 version_status="${GREEN}${snell_version}${RESET}"
