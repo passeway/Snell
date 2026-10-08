@@ -107,7 +107,7 @@ My-Snell = snell, YOUR_SERVER_IP, YOUR_PORT, psk=YOUR_PSK, version=6, mode=defau
 | `4` | 更新内核，保留原有启停状态 |
 | `5` | 重启服务并检查运行结果 |
 | `6` | 查看服务状态 |
-| `7` | 查看实时日志，`Ctrl+C` 返回菜单 |
+| `7` | Debian / Ubuntu 查看实时日志；Alpine 查看排错说明 |
 | `8` | 重新生成并查看 Surge 代理条目 |
 | `0` | 退出 |
 
@@ -127,8 +127,9 @@ Alpine：
 
 ```sh
 rc-service snell status
-tail -n 50 /var/log/snell.log
 ```
+
+Alpine 默认不保存 Snell 日志，也不配置日志轮转或定时任务。如需临时排查，先执行 `rc-service snell stop`，再运行 `/usr/local/bin/snell-server -l info -c /etc/snell/snell-server.conf`，日志仅显示在终端。结束后按 `Ctrl+C`，执行 `rc-service snell start` 恢复服务。Debian / Ubuntu 的实时日志按 `Ctrl+C` 返回菜单。
 
 公网 IPv4 自动查询失败时，可手动输入；取消后可通过菜单 **8** 重试。国家信息不可用时，节点名称默认使用 `Snell`。
 
@@ -138,7 +139,7 @@ tail -n 50 /var/log/snell.log
 
 ---
 
-**持续验证** · 三系统 CI 覆盖失败场景回归、日志轮转和官方 Snell v6 的真实代理传输。服务管理命令使用隔离模拟；实际线路表现需在部署环境中验证。
+**持续验证** · 三系统 CI 实际安装脚本依赖，覆盖失败场景回归、Alpine 日志关闭与清理，以及官方 Snell v6 的真实代理传输。服务管理命令使用隔离模拟；实际线路表现需在部署环境中验证。
 
 <div align="center">
 

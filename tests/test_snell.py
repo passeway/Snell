@@ -3,7 +3,6 @@ import os
 import pathlib
 import pty
 import select
-import shutil
 import signal
 import subprocess
 import tempfile
@@ -159,7 +158,7 @@ choose_port
         self.binary.write_text('original')
         result = self.run_shell('''check_snell_running() { return 0; }
 install_required_packages() { :; }; secure_config_files() { :; }
-configure_log_rotation() { :; }; replace_snell_binary() { :; }; restart_snell() { return 1; }
+replace_snell_binary() { :; }; restart_snell() { return 1; }
 update_snell''', expected=1)
         self.assertNotIn('更新成功', result.stdout)
 
@@ -172,7 +171,7 @@ install_required_packages() {{ :; }}; replace_snell_binary() {{ :; }}; choose_po
 id() {{ :; }}
 write_file() {{ command cat >/dev/null; [ "${{1##*/}}" != '{failed_name}' ]; }}
 systemctl() {{ :; }}; rc-update() {{ :; }}
-configure_log_rotation() {{ :; }}; restart_snell() {{ echo UNEXPECTED_START; }}
+restart_snell() {{ echo UNEXPECTED_START; }}
 install_snell''', expected=1)
             self.assertNotIn('UNEXPECTED_START', result.stdout)
             self.assertNotIn('安装成功', result.stdout)
@@ -184,10 +183,11 @@ install_snell''', expected=1)
         self.assertEqual(result.stdout.count('=== Snell 管理工具 ==='), 1)
 
     def test_ctrl_c_returns_from_live_logs(self):
-        log = self.root / 'var/log/snell.log'
-        log.write_text('LOG_READY\n')
+        journal = self.binary.parent / 'journalctl'
+        journal.write_text('#!/bin/sh\necho LOG_READY\nexec sleep 30\n')
+        journal.chmod(0o755)
         runner = self.root / 'runner.sh'
-        runner.write_text(self.code + '\nget_system_type() { echo alpine; }; show_logs follow; echo BACK_TO_MENU\n')
+        runner.write_text(self.code + f'\nPATH="{journal.parent}:$PATH"; show_logs follow; echo BACK_TO_MENU\n')
         pid, fd = pty.fork()
         if pid == 0:
             os.execlp('bash', 'bash', str(runner))
@@ -214,19 +214,30 @@ install_snell''', expected=1)
             os.waitpid(pid, 0)
             os.close(fd)
 
-    def test_log_rotation_setup_and_uninstall(self):
-        self.run_shell('get_system_type() { echo alpine; }; rc-update() { :; }; rc-service() { :; }; configure_log_rotation')
-        config = self.root / 'etc/snell/logrotate.conf'
-        cron = self.root / 'etc/periodic/hourly/snell-logrotate'
-        self.assertIn('size 1M', config.read_text())
-        self.assertIn('rotate 3', config.read_text())
-        self.assertIn('copytruncate', config.read_text())
-        self.assertEqual(cron.stat().st_mode & 0o777, 0o755)
-        subprocess.run(['sh', '-n', str(cron)], check=True)
+    def test_alpine_logs_return_immediately_with_diagnostic_guidance(self):
+        for mode in ('follow', 'recent'):
+            result = self.run_shell(f'''get_system_type() {{ echo alpine; }}
+tail() {{ echo UNEXPECTED_READ; return 1; }}
+journalctl() {{ echo UNEXPECTED_READ; return 1; }}
+show_logs {mode}''')
+            self.assertIn('已关闭 Snell 日志文件输出', result.stdout)
+            self.assertIn('snell-server -l info -c', result.stdout)
+            self.assertNotIn('UNEXPECTED_READ', result.stdout)
+
+    def test_uninstall_removes_only_snell_logging_files(self):
+        owned = ['etc/snell/logrotate.conf', 'etc/periodic/hourly/snell-logrotate',
+                 'var/lib/logrotate/snell.status', 'var/log/snell.log',
+                 'var/log/snell.log.1', 'var/log/snell.log.2.gz']
+        shared = ['etc/periodic/hourly/other', 'var/lib/logrotate/status',
+                  'var/log/other.log', 'etc/init.d/crond']
+        for name in owned + shared:
+            (self.root / name).write_text('keep-until-stopped')
         self.binary.write_text('original')
         self.run_shell('get_system_type() { echo alpine; }; rc-service() { [ "$2" != status ] || return 3; }; rc-update() { :; }; uninstall_snell')
-        self.assertFalse(cron.exists())
-        self.assertFalse(config.exists())
+        for name in owned:
+            self.assertFalse((self.root / name).exists(), name)
+        for name in shared:
+            self.assertEqual((self.root / name).read_text(), 'keep-until-stopped', name)
 
     def test_start_and_stop_command_failures_return_nonzero(self):
         for operation in ('start_snell', 'restart_snell', 'stop_snell'):
@@ -286,17 +297,54 @@ systemctl() {{ echo UNEXPECTED_DISABLE; }}; uninstall_snell''', expected=1)
             self.assertTrue(self.server.exists())
 
     def test_update_preserves_stopped_or_running_state_and_credentials(self):
-        for running in (0, 1):
-            self.binary.write_text('old-core'); self.server_config()
-            before = self.server.read_bytes()
-            result = self.run_shell(f'''check_snell_running() {{ return {0 if running else 1}; }}
+        for system in ('debian', 'ubuntu', 'alpine'):
+            for running in (0, 1):
+                self.binary.write_text('old-core'); self.server_config()
+                before = self.server.read_bytes()
+                log = self.root / 'var/log/snell.log'
+                cron = self.root / 'etc/periodic/hourly/snell-logrotate'
+                service = self.root / 'etc/init.d/snell'
+                for path in (log, cron, service):
+                    path.write_text('old-content')
+                result = self.run_shell(f'''get_system_type() {{ echo {system}; }}
+check_snell_running() {{ return {0 if running else 1}; }}
 check_snell_stopped() {{ return {1 if running else 0}; }}
-install_required_packages() {{ :; }}; configure_log_rotation() {{ :; }}
-replace_snell_binary() {{ echo REPLACED; }}; restart_snell() {{ echo RESTARTED; }}
+install_required_packages() {{ :; }}
+replace_snell_binary() {{ echo REPLACED; }}
+restart_snell() {{ [ -f '{log}' ] || return 1; echo RESTARTED; }}
 show_logs() {{ :; }}; refresh_client_config() {{ :; }}; update_snell''')
-            self.assertIn('REPLACED', result.stdout)
-            self.assertEqual('RESTARTED' in result.stdout, bool(running))
-            self.assertEqual(self.server.read_bytes(), before)
+                self.assertIn('REPLACED', result.stdout)
+                self.assertEqual('RESTARTED' in result.stdout, bool(running))
+                self.assertEqual(self.server.read_bytes(), before)
+                if system == 'alpine':
+                    self.assertIn('output_log="/dev/null"', service.read_text())
+                    self.assertIn('error_log="/dev/null"', service.read_text())
+                    self.assertFalse(log.exists())
+                    self.assertFalse(cron.exists())
+                else:
+                    for path in (log, cron, service):
+                        self.assertEqual(path.read_text(), 'old-content')
+
+    def test_alpine_update_service_write_failure_is_not_success(self):
+        self.binary.write_text('old-core'); self.server_config()
+        result = self.run_shell('''get_system_type() { echo alpine; }
+check_snell_running() { return 0; }; install_required_packages() { :; }
+replace_snell_binary() { :; }; write_file() { cat >/dev/null; return 1; }
+restart_snell() { echo UNEXPECTED_RESTART; }; update_snell''', expected=1)
+        self.assertNotIn('UNEXPECTED_RESTART', result.stdout)
+        self.assertNotIn('更新成功', result.stdout)
+
+    def test_alpine_install_does_not_create_log_or_cron_job(self):
+        result = self.run_shell('''get_system_type() { echo alpine; }
+install_required_packages() { :; }; replace_snell_binary() { :; }
+choose_port() { echo 32000; }; id() { :; }; rc-update() { :; }
+restart_snell() { :; }; refresh_client_config() { :; }; install_snell''')
+        self.assertIn('安装成功', result.stdout)
+        self.assertTrue(self.server.exists())
+        self.assertIn('error_log="/dev/null"', (self.root / 'etc/init.d/snell').read_text())
+        self.assertFalse(list((self.root / 'var/log').iterdir()))
+        self.assertFalse(list((self.root / 'etc/periodic/hourly').iterdir()))
+        self.assertFalse((self.root / 'etc/snell/logrotate.conf').exists())
 
     def test_update_does_not_modify_files_on_unknown_or_transitional_state(self):
         self.binary.write_text('old-core'); self.server_config()
@@ -326,20 +374,20 @@ replace_snell_binary() { echo UNEXPECTED_REPLACE; }; update_snell''', expected=1
         self.assertIn('203.0.113.10', result.stdout)
         self.assertNotIn('127.0.0.1', result.stdout)
 
-    @unittest.skipUnless(shutil.which('logrotate') and os.geteuid() == 0, 'requires logrotate and root')
-    def test_real_rotation_keeps_open_log_and_limits_archives(self):
-        self.run_shell('get_system_type() { echo alpine; }; rc-update() { :; }; rc-service() { :; }; configure_log_rotation')
-        config = self.root / 'etc/snell/logrotate.conf'
-        config.write_text(config.read_text().replace('su root snell', 'su root root'))
-        log = self.root / 'var/log/snell.log'
-        with log.open('ab', buffering=0) as stream:
-            for i in range(5):
-                stream.write(b'x' * (1024 * 1024 + 1))
-                subprocess.run(['logrotate', '-s', str(self.root / 'state'), str(config)], check=True, capture_output=True)
-                self.assertEqual(log.stat().st_size, 0)
-            stream.write(b'new log line\n')
-        self.assertEqual(log.read_bytes(), b'new log line\n')
-        self.assertEqual(len(list(log.parent.glob('snell.log.*'))), 3)
+    def test_openrc_service_discards_stdout_and_stderr(self):
+        self.run_shell('write_openrc_service')
+        service = self.root / 'etc/init.d/snell'
+        subprocess.run(['sh', '-n', str(service)], check=True)
+        self.assertEqual(service.stat().st_mode & 0o777, 0o755)
+        self.assertNotIn('start_pre', service.read_text())
+        # Execute a noisy process with the destinations from the generated service.
+        self.binary.write_text('#!/bin/sh\necho STDOUT_LOG\necho STDERR_LOG >&2\n')
+        self.binary.chmod(0o755)
+        result = self.run_shell(f'''. "{service}"
+[ "$output_log" = /dev/null ] && [ "$error_log" = /dev/null ] || exit 1
+"$command" >"$output_log" 2>"$error_log"''')
+        self.assertEqual(result.stdout + result.stderr, '')
+        self.assertFalse(list((self.root / 'var/log').iterdir()))
 
 
 if __name__ == '__main__':
