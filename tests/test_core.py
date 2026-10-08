@@ -39,7 +39,16 @@ def wait_port(port, process):
 @unittest.skipUnless(SNELL and CLIENT and Path(SNELL).is_file() and Path(CLIENT).is_file(),
                      'requires official Snell and sing-box test binaries')
 class CoreTests(unittest.TestCase):
-    def test_installer_config_relays_real_traffic(self):
+    def test_default_mode_relays_real_traffic(self):
+        self.check_mode_traffic('default', '1')
+
+    def test_unshaped_mode_relays_real_traffic(self):
+        self.check_mode_traffic('unshaped', '2')
+
+    def test_unsafe_raw_mode_relays_real_traffic(self):
+        self.check_mode_traffic('unsafe-raw', '3')
+
+    def check_mode_traffic(self, mode, selection):
         with tempfile.TemporaryDirectory(prefix='snell-core-') as td:
             root = Path(td)
             processes = []
@@ -75,15 +84,32 @@ class CoreTests(unittest.TestCase):
                     'write_file /etc/snell/snell-server.conf 640 root:snell << EOF || return 1\n', 1)[1].split('\nEOF', 1)[0]
                 config = config.replace('${RANDOM_PORT}', str(port)).replace('${RANDOM_PSK}', psk)
                 config = config.replace('0.0.0.0:', '127.0.0.1:')
-                (root / 'server.conf').write_text(config + '\n')
-                server = start([SNELL, '-l', 'info', '-c', str(root / 'server.conf')], 'server.log')
+                if mode == 'default':
+                    config = config.replace('mode = default', 'mode = unshaped')
+                (root / 'snell-server.conf').write_text(config + '\n')
+                (root / 'snell-client.conf').write_text(
+                    f'Test = snell, 203.0.113.1, {port}, psk={psk}, version=6, mode=default\n')
+                # Exercise the real menu operation in an isolated config directory.
+                # Only the service manager and ownership are mocked; both cores run below.
+                script = root / 'installer.sh'
+                script.write_text(SOURCE.read_text().replace('/etc/snell', str(root)))
+                subprocess.run(['bash', '-c', '''source "$1"
+check_snell_installed() { :; }; check_snell_running() { return 1; }
+check_snell_stopped() { :; }; chown() { :; }
+switch_snell_mode''', 'mode-test', str(script)], input=selection + '\n',
+                               text=True, capture_output=True, check=True, timeout=10)
+                fields = dict(field.strip().split('=', 1) for field in
+                              (root / 'snell-client.conf').read_text().split(',')[3:])
+                self.assertEqual(fields['mode'], mode)
+                self.assertEqual(fields['psk'], psk)
+                server = start([SNELL, '-l', 'info', '-c', str(root / 'snell-server.conf')], 'server.log')
                 wait_port(port, server)
                 local_port = free_port()
                 client_config = {
                     'log': {'level': 'warn'},
                     'inbounds': [{'type': 'mixed', 'listen': '127.0.0.1', 'listen_port': local_port}],
                     'outbounds': [{'type': 'snell', 'server': '127.0.0.1', 'server_port': port,
-                                   'version': 6, 'psk': psk, 'mode': 'default'}],
+                                   'version': 6, 'psk': fields['psk'], 'mode': fields['mode']}],
                 }
                 client_file = root / 'client.json'
                 client_file.write_text(json.dumps(client_config))
