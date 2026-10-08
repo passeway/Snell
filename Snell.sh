@@ -526,11 +526,7 @@ show_menu() {
     echo "4. 更新 Snell 内核"
     echo "5. 重启 Snell 服务"
     echo "6. 查看 Snell 状态"
-    if [ "$(get_system_type)" = alpine ]; then
-        echo "7. 查看 Snell 排错说明"
-    else
-        echo "7. 查看 Snell 日志"
-    fi
+    echo "7. 查看 Snell 日志"
     echo "8. 查看 Snell 配置"
     echo "0. 退出"
     echo -e "${GREEN}======================${RESET}"
