@@ -54,7 +54,7 @@ See the [official release notes](https://kb.nssurge.com/surge-knowledge-base/rel
 
 - **Ready after installation**: dependencies, a random port, a 48-character random PSK and a Surge proxy entry are prepared for you.
 - **Three Linux systems**: systemd on Debian / Ubuntu and OpenRC on Alpine, with AMD64 and ARM64 support.
-- **One management menu**: installation, service controls, logs and client configuration export.
+- **One management menu**: installation, service controls, logs, mode switching and client configuration export.
 - **Verified outcomes**: binary execution and service-state checks, with the running or stopped state preserved during updates.
 
 > The installer currently downloads the official **v6.0.0rc2** test release. It uses `mode=default` with AES encryption and traffic shaping. Your client must support Snell v6 and use the same mode as the server.
@@ -95,6 +95,21 @@ The address, port and PSK above are placeholders. Use the actual entry printed a
 
 Option **8** reads the current server port, PSK and mode while preserving the existing valid address and node name. After editing the server configuration, restart with **5**, then export with **8**.
 
+## Switch Snell modes
+
+Choose **9 · Switch Snell mode** to view the configured mode and select:
+
+| Option | Mode | Behavior and use |
+| :---: | :--- | :--- |
+| `1` | `default` | AES encryption with traffic shaping; the default choice |
+| `2` | `unshaped` | Keeps AES encryption and disables traffic shaping |
+| `3` | `unsafe-raw` | Disables encryption and shaping; plaintext transport for an intranet or an existing secure tunnel only |
+| `0` | Return | Keep the current configuration |
+
+Switching preserves the port, PSK and other server settings and regenerates the client entry. A running service is restarted and checked; a stopped service stays stopped until you start it. Failed writes or restarts trigger an attempt to restore the previous configuration without creating backup files.
+
+**Copy the new entry to Surge after switching: the client and server must use the same `mode`.** See the [official release notes](https://kb.nssurge.com/surge-knowledge-base/release-notes/snell) for mode definitions.
+
 ## Service management
 
 Run the installation command again to open the menu.
@@ -109,6 +124,7 @@ Run the installation command again to open the menu.
 | `6` | View service status |
 | `7` | Follow logs on Debian / Ubuntu; show troubleshooting instructions on Alpine |
 | `8` | Regenerate and display the Surge proxy entry |
+| `9` | Switch Snell mode |
 | `0` | Exit |
 
 <details>
@@ -139,7 +155,7 @@ For bug reports, include your OS, architecture, server and client versions, and 
 
 ---
 
-**Continuously checked** · Three-system CI installs the script's actual dependencies and covers failure-path regressions, Alpine log suppression and cleanup, and real proxy traffic through the official Snell v6 server. Service manager commands are mocked; validate your actual network path on your own deployment.
+**Continuously checked** · Three-system CI installs the script's actual dependencies and covers failure-path regressions, mode switching and recovery, Alpine log suppression and cleanup, and real proxy traffic in all three modes through the official Snell v6 server. Service manager commands are mocked; validate your actual network path on your own deployment.
 
 <div align="center">
 

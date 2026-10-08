@@ -389,6 +389,174 @@ replace_snell_binary() { echo UNEXPECTED_REPLACE; }; update_snell''', expected=1
         self.assertEqual(result.stdout + result.stderr, '')
         self.assertFalse(list((self.root / 'var/log').iterdir()))
 
+    def prepare_mode_switch(self, mode='default'):
+        self.server_config(mode=mode)
+        self.client.write_text('HK = snell, 203.0.113.1, 40443, psk=OldSecret, version=6, mode=default\n')
+        return self.server.read_bytes(), self.client.read_bytes()
+
+    def assert_mode_files_unchanged(self, before):
+        self.assertEqual((self.server.read_bytes(), self.client.read_bytes()), before)
+        self.assertFalse(list(self.server.parent.glob('*.tmp.*')))
+
+    def test_mode_switch_menu_keeps_existing_labels_and_dispatches_nine(self):
+        result = self.run_shell('''check_root() { :; }; clear() { :; }
+check_snell_installed() { return 1; }; check_snell_running() { return 1; }
+switch_snell_mode() { echo MODE_MENU_CALLED; }; main''', '9\n\n0\n')
+        self.assertIn('7. 查看 Snell 日志', result.stdout)
+        self.assertIn('8. 查看 Snell 配置', result.stdout)
+        self.assertIn('9. 切换 Snell 模式', result.stdout)
+        self.assertIn('MODE_MENU_CALLED', result.stdout)
+
+    def test_mode_switch_all_modes_on_both_service_managers(self):
+        for system in ('debian', 'ubuntu', 'alpine'):
+            for running in (False, True):
+                for selection, mode in [('1', 'default'), ('2', 'unshaped'), ('3', 'unsafe-raw')]:
+                    with self.subTest(system=system, running=running, mode=mode):
+                        self.prepare_mode_switch('unshaped' if mode == 'default' else 'default')
+                        result = self.run_shell(f'''get_system_type() {{ echo {system}; }}
+check_snell_installed() {{ :; }}; sleep() {{ :; }}
+systemctl() {{
+    case "$1" in
+        is-active) return {0 if running else 3} ;;
+        show) echo inactive ;;
+        restart) echo RESTARTED ;;
+        *) return 99 ;;
+    esac
+}}
+rc-service() {{
+    case "$2" in
+        status) return {0 if running else 3} ;;
+        restart) echo RESTARTED ;;
+        *) return 99 ;;
+    esac
+}}
+fetch_text() {{ echo UNEXPECTED_LOOKUP >&2; return 1; }}
+switch_snell_mode''', selection + '\n')
+                        self.assertIn(f'mode = {mode}\n', self.server.read_text())
+                        self.assertIn('listen = [::]:40443,0.0.0.0:40443', self.server.read_text())
+                        self.assertIn('psk = ChangedSecret=123456789', self.server.read_text())
+                        self.assertIn(f'mode={mode}, reuse=true', self.client.read_text())
+                        self.assertIn('HK = snell, 203.0.113.1, 40443, psk=ChangedSecret=123456789', result.stdout)
+                        self.assertEqual('RESTARTED' in result.stdout, running)
+                        self.assertNotIn('UNEXPECTED_LOOKUP', result.stderr)
+                        self.assertEqual(self.server.stat().st_mode & 0o777, 0o640)
+                        self.assertEqual(self.client.stat().st_mode & 0o777, 0o600)
+                        self.assertEqual(sorted(p.name for p in self.server.parent.iterdir()),
+                                         ['snell-client.conf', 'snell-server.conf'])
+
+    def test_mode_switch_cancellation_and_invalid_input_keep_files(self):
+        for data, expected in [('', 0), ('\n', 0), ('0\n', 0), ('9\n', 1), ('2; touch bad\n', 1)]:
+            before = self.prepare_mode_switch()
+            result = self.run_shell('''check_snell_installed() { :; }
+check_snell_running() { echo UNEXPECTED_SERVICE; return 0; }
+switch_snell_mode''', data, expected=expected)
+            self.assert_mode_files_unchanged(before)
+            self.assertNotIn('UNEXPECTED_SERVICE', result.stdout)
+
+    def test_mode_switch_rejects_uninstalled_or_missing_config(self):
+        self.run_shell('check_snell_installed() { return 1; }; switch_snell_mode', '1\n', expected=1)
+        self.run_shell('check_snell_installed() { :; }; switch_snell_mode', '1\n', expected=1)
+
+    def test_mode_switch_same_mode_refreshes_client_without_restart(self):
+        before = self.prepare_mode_switch()
+        result = self.run_shell('''check_snell_installed() { :; }
+restart_snell() { echo UNEXPECTED_RESTART; }; switch_snell_mode''', '1\n')
+        self.assertEqual(self.server.read_bytes(), before[0])
+        self.assertIn('psk=ChangedSecret=123456789', self.client.read_text())
+        self.assertNotIn('UNEXPECTED_RESTART', result.stdout)
+
+    def test_mode_switch_normalizes_only_the_server_mode(self):
+        for mode_lines in ('', '  mode = default # old\nmode=default\n'):
+            self.prepare_mode_switch()
+            self.server.write_text('[other]\nmode = keep\n[snell-server] ; note\n'
+                                   '# mode = comment\n' + mode_lines +
+                                   'listen = 0.0.0.0:40443\npsk = Secret123456789\n'
+                                   'dns-ip-preference = ipv4\n[extra]\nmode = keep-too\n')
+            self.run_shell('''check_snell_installed() { :; }
+check_snell_running() { return 1; }; check_snell_stopped() { :; }
+switch_snell_mode''', '2\n')
+            self.assertEqual(self.server.read_text(),
+                             '[other]\nmode = keep\n[snell-server] ; note\nmode = unshaped\n'
+                             '# mode = comment\nlisten = 0.0.0.0:40443\npsk = Secret123456789\n'
+                             'dns-ip-preference = ipv4\n[extra]\nmode = keep-too\n')
+
+    def test_mode_switch_invalid_config_does_not_write_files(self):
+        for config in ('[other]\nmode=default\n',
+                       '[snell-server]\nmode=default\n[snell-server]\nmode=default\n',
+                       '[snell-server]\nmode=default\nlisten=0.0.0.0:99999\npsk=secret\n'):
+            self.prepare_mode_switch()
+            self.server.write_text(config)
+            before = self.server.read_bytes(), self.client.read_bytes()
+            self.run_shell('''check_snell_installed() { :; }
+check_snell_running() { return 1; }; check_snell_stopped() { :; }
+switch_snell_mode''', '2\n', expected=1)
+            self.assert_mode_files_unchanged(before)
+
+    def test_mode_switch_unknown_service_state_does_not_write_files(self):
+        before = self.prepare_mode_switch()
+        self.run_shell('''check_snell_installed() { :; }
+check_snell_running() { return 1; }; check_snell_stopped() { return 1; }
+switch_snell_mode''', '2\n', expected=1)
+        self.assert_mode_files_unchanged(before)
+
+    def test_mode_switch_cancelled_address_lookup_keeps_server_config(self):
+        self.server_config(mode='default')
+        before = self.server.read_bytes()
+        self.run_shell('''check_snell_installed() { :; }
+check_snell_running() { return 1; }; check_snell_stopped() { :; }
+fetch_text() { return 1; }; switch_snell_mode''', '2\n\n', expected=1)
+        self.assertEqual(self.server.read_bytes(), before)
+        self.assertFalse(self.client.exists())
+
+    def test_mode_switch_write_failure_preserves_both_configs(self):
+        for destination in (self.server, self.client):
+            before = self.prepare_mode_switch()
+            result = self.run_shell(f'''check_snell_installed() {{ :; }}
+check_snell_running() {{ return 0; }}
+mv() {{ [ "${{@: -1}}" != '{destination}' ] || return 1; command mv "$@"; }}
+restart_snell() {{ echo UNEXPECTED_RESTART; }}; switch_snell_mode''', '2\n', expected=1)
+            self.assert_mode_files_unchanged(before)
+            self.assertNotIn('UNEXPECTED_RESTART', result.stdout)
+
+    def test_mode_switch_restart_failure_restores_configs_and_original_service(self):
+        for had_client in (True, False):
+            before = self.prepare_mode_switch()
+            if not had_client:
+                self.client.unlink()
+            result = self.run_shell('''check_snell_installed() { :; }; check_snell_running() { :; }
+get_public_ip() { echo 203.0.113.1; }; get_country() { echo HK; }
+attempts=0
+restart_snell() { attempts=$((attempts+1)); echo RESTART_MODE:$(config_value mode); [ "$attempts" -gt 1 ]; }
+switch_snell_mode''', '2\n', expected=1)
+            self.assertEqual(self.server.read_bytes(), before[0])
+            if had_client:
+                self.assertEqual(self.client.read_bytes(), before[1])
+            else:
+                self.assertFalse(self.client.exists())
+            self.assertIn('RESTART_MODE:unshaped\nRESTART_MODE:default', result.stdout)
+            self.assertIn('已恢复原配置', result.stderr)
+            self.assertNotIn('模式已切换', result.stdout)
+
+    def test_mode_switch_failed_recovery_is_reported(self):
+        before = self.prepare_mode_switch()
+        result = self.run_shell('''check_snell_installed() { :; }; check_snell_running() { :; }
+restart_snell() { return 1; }; switch_snell_mode''', '2\n', expected=1)
+        self.assert_mode_files_unchanged(before)
+        self.assertIn('自动恢复未完成', result.stderr)
+        self.assertNotIn('模式已切换', result.stdout)
+
+    def test_mode_switch_interruption_restores_previous_mode(self):
+        before = self.prepare_mode_switch()
+        result = self.run_shell('''check_snell_installed() { :; }; check_snell_running() { :; }
+attempts=0
+restart_snell() {
+    attempts=$((attempts+1))
+    if [ "$attempts" -eq 1 ]; then kill -TERM "$BASHPID"; else return 0; fi
+}
+switch_snell_mode''', '2\n', expected=143)
+        self.assert_mode_files_unchanged(before)
+        self.assertIn('已恢复原配置', result.stderr)
+
 
 if __name__ == '__main__':
     unittest.main()
