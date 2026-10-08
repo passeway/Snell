@@ -34,7 +34,7 @@ install_required_packages() {
             apt-get update && apt-get -o DPkg::Lock::Timeout=120 install -y wget unzip curl ca-certificates iproute2 coreutils
             ;;
         alpine)
-            apk add --no-cache bash wget unzip curl ca-certificates coreutils openrc gcompat libstdc++ iproute2 logrotate busybox-openrc
+            apk add --no-cache bash wget unzip curl ca-certificates coreutils openrc gcompat libstdc++ iproute2
             ;;
         *) echo -e "${RED}仅支持 Debian、Ubuntu 和 Alpine${RESET}"; return 1 ;;
     esac
@@ -71,29 +71,32 @@ secure_config_files() {
     fi
 }
 
-configure_log_rotation() {
+remove_snell_log_files() {
     [ "$(get_system_type)" = alpine ] || return 0
-    mkdir -p /etc/snell /etc/periodic/hourly /var/lib/logrotate || return 1
-    # 私有配置和状态文件，避免与发行版每天轮转全部日志的任务重复处理。
-    write_file /etc/snell/logrotate.conf 644 root:root <<'ROTATE' || return 1
-/var/log/snell.log {
-    size 1M
-    rotate 3
-    compress
-    missingok
-    notifempty
-    copytruncate
-    su root snell
+    # 只清理 Snell 专用文件；其他程序可能仍在使用 cron 和 logrotate。
+    rm -f /etc/periodic/hourly/snell-logrotate /etc/snell/logrotate.conf \
+        /var/lib/logrotate/snell.status /var/log/snell.log /var/log/snell.log.[0-9]*
 }
-ROTATE
-    write_file /etc/periodic/hourly/snell-logrotate 755 root:root <<'CRON' || return 1
-#!/bin/sh
-exec /usr/sbin/logrotate -s /var/lib/logrotate/snell.status /etc/snell/logrotate.conf
-CRON
-    rc-update add crond default || return 1
-    if ! rc-service crond status >/dev/null 2>&1; then
-        rc-service crond start || return 1
-    fi
+
+write_openrc_service() {
+    write_file /etc/init.d/snell 755 root:root << 'OPENRC'
+#!/sbin/openrc-run
+name="Snell Proxy Service"
+command="/usr/local/bin/snell-server"
+command_args="-l info -c /etc/snell/snell-server.conf"
+command_user="snell:snell"
+supervisor="supervise-daemon"
+respawn_delay=3
+respawn_max=5
+respawn_period=60
+output_log="/dev/null"
+error_log="/dev/null"
+rc_ulimit="-n 32768"
+capabilities="^cap_net_bind_service,^cap_net_admin,^cap_net_raw"
+depend() {
+    after net
+}
+OPENRC
 }
 
 valid_ipv4() {
@@ -229,24 +232,25 @@ service_action() {
 }
 
 show_logs() {
+    if [ "$(get_system_type)" = alpine ]; then
+        echo -e "${YELLOW}Alpine 已关闭 Snell 日志文件输出。${RESET}"
+        echo "临时排查时，请先确认服务已停止，再前台运行："
+        echo "/usr/local/bin/snell-server -l info -c /etc/snell/snell-server.conf"
+        echo "排查结束按 Ctrl+C，再通过菜单 3 启动服务。"
+        return 0
+    fi
     if [ "$1" = follow ]; then
         # 父进程仅在查看日志期间忽略 Ctrl+C，子进程恢复默认信号处理。
         local result
         trap ':' INT
         (
             trap - INT
-            if [ "$(get_system_type)" = alpine ]; then
-                exec tail -n 50 -F /var/log/snell.log
-            else
-                exec journalctl -u snell -f -o cat
-            fi
+            exec journalctl -u snell -f -o cat
         )
         result=$?
         trap 'echo -e "${RED}已取消操作${RESET}"; exit 130' INT
         [ "$result" -eq 130 ] && return 0
         return "$result"
-    elif [ "$(get_system_type)" = alpine ]; then
-        tail -n 8 /var/log/snell.log
     else
         journalctl -u snell -n 8 --no-pager
     fi
@@ -334,7 +338,7 @@ wait_snell_state() {
 
 start_snell_checked() {
     if ! service_action "$1" || ! wait_snell_state running; then
-        fail "Snell 启动或重启失败，服务未保持运行，请查看日志"
+        fail "Snell 启动或重启失败，服务未保持运行，请通过菜单 7 排查"
         show_logs recent >&2
         return 1
     fi
@@ -385,27 +389,7 @@ dns-ip-preference = default
 EOF
 
     if [ "$(get_system_type)" = alpine ]; then
-        write_file /etc/init.d/snell 755 root:root << 'OPENRC' || return 1
-#!/sbin/openrc-run
-name="Snell Proxy Service"
-command="/usr/local/bin/snell-server"
-command_args="-l info -c /etc/snell/snell-server.conf"
-command_user="snell:snell"
-supervisor="supervise-daemon"
-respawn_delay=3
-respawn_max=5
-respawn_period=60
-output_log="/var/log/snell.log"
-error_log="/var/log/snell.log"
-rc_ulimit="-n 32768"
-capabilities="^cap_net_bind_service,^cap_net_admin,^cap_net_raw"
-depend() {
-    after net
-}
-start_pre() {
-    checkpath --file --mode 0640 --owner snell:snell /var/log/snell.log
-}
-OPENRC
+        write_openrc_service || return 1
         rc-update add snell default || return 1
     else
     write_file /etc/systemd/system/snell.service 644 root:root << EOF || return 1
@@ -433,10 +417,10 @@ EOF
 
         systemctl daemon-reload && systemctl enable snell || return 1
     fi
-    configure_log_rotation || { fail "配置日志轮转失败"; return 1; }
     restart_snell || { fail "Snell 安装后启动失败"; return 1; }
+    remove_snell_log_files || { fail "清理 Snell 旧日志文件失败"; return 1; }
     echo -e "${GREEN}Snell 服务已启动${RESET}"
-    show_logs recent
+    if [ "$(get_system_type)" != alpine ]; then show_logs recent; fi
     echo -e "${GREEN}Snell 示例配置，项目地址: https://github.com/passeway/Snell${RESET}"
     refresh_client_config || return 1
     echo -e "${GREEN}🎉Snell 安装成功${RESET}"
@@ -459,18 +443,21 @@ update_snell() {
     fi
     install_required_packages || return 1
     secure_config_files || { fail "设置配置文件权限失败"; return 1; }
-    configure_log_rotation || { fail "配置日志轮转失败"; return 1; }
     replace_snell_binary || return 1
+    if [ "$(get_system_type)" = alpine ]; then
+        write_openrc_service || return 1
+    fi
     if (( was_running )); then
         restart_snell || {
-            echo -e "${RED}新程序已替换，但重启失败；请查看日志。未创建备份。${RESET}"
+            echo -e "${RED}新程序已替换，但重启失败；请通过菜单 7 排查。未创建备份。${RESET}"
             return 1
         }
     else
         echo -e "${GREEN}服务保持停止状态，可通过菜单 3 启动${RESET}"
     fi
+    remove_snell_log_files || { fail "清理 Snell 旧日志文件失败"; return 1; }
     echo -e "${GREEN}🎉Snell 更新成功${RESET}"
-    if (( was_running )); then show_logs recent; fi
+    if (( was_running )) && [ "$(get_system_type)" != alpine ]; then show_logs recent; fi
     echo -e "${GREEN}Snell 示例配置，项目地址: https://github.com/passeway/Snell${RESET}"
     refresh_client_config
 }
@@ -481,8 +468,8 @@ uninstall_snell() {
     stop_snell || return 1
     if [ "$(get_system_type)" = alpine ]; then
         rc-update del snell default || return 1
-        rm -f /etc/init.d/snell /etc/periodic/hourly/snell-logrotate || return 1
-        rm -f /var/lib/logrotate/snell.status || return 1
+        rm -f /etc/init.d/snell || return 1
+        remove_snell_log_files || return 1
     else
         systemctl disable snell || return 1
         rm -f /etc/systemd/system/snell.service && systemctl daemon-reload || return 1
@@ -539,7 +526,11 @@ show_menu() {
     echo "4. 更新 Snell 内核"
     echo "5. 重启 Snell 服务"
     echo "6. 查看 Snell 状态"
-    echo "7. 查看 Snell 日志"
+    if [ "$(get_system_type)" = alpine ]; then
+        echo "7. 查看 Snell 排错说明"
+    else
+        echo "7. 查看 Snell 日志"
+    fi
     echo "8. 查看 Snell 配置"
     echo "0. 退出"
     echo -e "${GREEN}======================${RESET}"

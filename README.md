@@ -107,7 +107,7 @@ Run the installation command again to open the menu.
 | `4` | Update the binary, preserving the running or stopped state |
 | `5` | Restart and check the result |
 | `6` | View service status |
-| `7` | Follow logs; `Ctrl+C` returns to the menu |
+| `7` | Follow logs on Debian / Ubuntu; show troubleshooting instructions on Alpine |
 | `8` | Regenerate and display the Surge proxy entry |
 | `0` | Exit |
 
@@ -127,8 +127,9 @@ Alpine:
 
 ```sh
 rc-service snell status
-tail -n 50 /var/log/snell.log
 ```
+
+Alpine does not save Snell logs or configure log rotation or scheduled tasks. For temporary diagnostics, run `rc-service snell stop`, then `/usr/local/bin/snell-server -l info -c /etc/snell/snell-server.conf` to display output in the terminal. Press `Ctrl+C` when finished and run `rc-service snell start` to restore the service. On Debian / Ubuntu, `Ctrl+C` exits live logs and returns to the menu.
 
 If automatic public IPv4 lookup fails, enter it manually or cancel and retry with option **8**. If country lookup fails, the default node name is `Snell`.
 
@@ -138,7 +139,7 @@ For bug reports, include your OS, architecture, server and client versions, and 
 
 ---
 
-**Continuously checked** · Three-system CI covers failure-path regressions, log rotation and real proxy traffic through the official Snell v6 server. Service manager commands are mocked; validate your actual network path on your own deployment.
+**Continuously checked** · Three-system CI installs the script's actual dependencies and covers failure-path regressions, Alpine log suppression and cleanup, and real proxy traffic through the official Snell v6 server. Service manager commands are mocked; validate your actual network path on your own deployment.
 
 <div align="center">
 

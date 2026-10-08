@@ -29,16 +29,12 @@ jobs:
         run: |
           docker run --rm -v "$GITHUB_WORKSPACE:/repo:ro" -v "$RUNNER_TEMP/snell-cores:/core:ro" -e SNELL_TEST_BINARY=/core/snell-server -e SING_BOX_TEST_BINARY=/core/sing-box -w /repo "$TEST_IMAGE" sh -ec '
             if command -v apk >/dev/null; then
-              apk add --no-cache bash python3 coreutils iproute2 logrotate curl gcompat libstdc++
+              apk add --no-cache bash python3
             else
               apt-get update
-              apt-get install -y --no-install-recommends bash python3 coreutils iproute2 logrotate curl
+              apt-get install -y --no-install-recommends bash python3
             fi
             bash -c "source ./Snell.sh; install_required_packages"
-            if command -v apk >/dev/null; then
-              test -x /etc/init.d/crond
-              command -v crond
-            fi
             bash -n Snell.sh
             bash -n Snell-docker.sh
             PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -v
