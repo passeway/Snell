@@ -174,8 +174,8 @@ config_value() {
     ' /etc/snell/snell-server.conf
 }
 
-refresh_client_config() {
-    local listen port psk mode address="" label=""
+render_client_config() {
+    local listen port psk mode="${1:-}" address="" label=""
     [ -f /etc/snell/snell-server.conf ] || { fail "服务端配置不存在"; return 1; }
     listen=$(config_value listen) && psk=$(config_value psk) || {
         fail "服务端配置缺少 listen 或 psk"; return 1;
@@ -185,7 +185,7 @@ refresh_client_config() {
     port=${listen##*:}
     [[ "$port" =~ ^[0-9]{1,5}$ ]] && (( 10#$port >= 1 && 10#$port <= 65535 )) &&
         [ -n "$psk" ] || { fail "服务端端口或 PSK 无效"; return 1; }
-    mode=$(config_value mode) || mode=default
+    if [ -z "$mode" ]; then mode=$(config_value mode) || mode=default; fi
     case "$mode" in
         default|unshaped|unsafe-raw) ;;
         *) fail "服务端 mode 无效"; return 1 ;;
@@ -201,13 +201,131 @@ refresh_client_config() {
     if [ -z "$label" ] || [[ "$label" == *,* || "$label" == *$'\n'* ]]; then
         label=$(get_country "$address")
     fi
-    write_file /etc/snell/snell-client.conf 600 root:root <<EOF || {
-${label} = snell, ${address}, ${port}, psk=${psk}, version=6, mode=${mode}, reuse=true
-EOF
+    printf '%s = snell, %s, %s, psk=%s, version=6, mode=%s, reuse=true\n' \
+        "$label" "$address" "$port" "$psk" "$mode"
+}
+
+refresh_client_config() {
+    local client_config
+    client_config=$(render_client_config) || return 1
+    write_file /etc/snell/snell-client.conf 600 root:root <<< "$client_config" || {
         fail "写入客户端配置失败"; return 1;
     }
-    cat /etc/snell/snell-client.conf
+    printf '%s\n' "$client_config"
 }
+
+render_server_mode() {
+    case "$1" in
+        default|unshaped|unsafe-raw) ;;
+        *) fail "Snell 模式无效"; return 1 ;;
+    esac
+    # 只更新目标节的 mode；缺失时补上，重复项合并，其他配置原样保留。
+    awk -v mode="$1" '
+        /^[[:space:]]*\[/ {
+            section=$0
+            sub(/[[:space:]]*[#;].*$/, "", section)
+            gsub(/[[:space:]]/, "", section)
+            active=(section == "[snell-server]")
+            print
+            if (active) { sections++; print "mode = " mode }
+            next
+        }
+        active && /^[[:space:]]*mode[[:space:]]*=/ { next }
+        { print }
+        END { if (sections != 1) exit 1 }
+    ' /etc/snell/snell-server.conf
+}
+
+switch_snell_mode() (
+    local current_mode selection selected_mode was_running=0
+    local old_server old_client="" new_server new_client had_client=0
+    local server_written=0 client_written=0 restart_attempted=0
+    if ! check_snell_installed || [ ! -f /etc/snell/snell-server.conf ]; then
+        fail "Snell 尚未安装或服务端配置不存在，请先安装"
+        return 1
+    fi
+    current_mode=$(config_value mode) || current_mode=default
+    echo -e "${GREEN}=== 切换 Snell 模式 ===${RESET}"
+    printf '当前配置模式: %s\n' "$current_mode"
+    echo "1. default（AES 加密 + 流量整形，默认）"
+    echo "2. unshaped（AES 加密，无流量整形）"
+    echo "3. unsafe-raw（明文传输，仅适合内网或安全隧道）"
+    echo "0. 返回"
+    read -r -p "请选择 Snell 模式: " selection || return 0
+    case "$selection" in
+        1) selected_mode=default ;;
+        2) selected_mode=unshaped ;;
+        3) selected_mode=unsafe-raw ;;
+        0|"") return 0 ;;
+        *) fail "无效的选项"; return 1 ;;
+    esac
+    if [ "$selected_mode" = "$current_mode" ]; then
+        echo -e "${YELLOW}当前已配置此模式，无需切换${RESET}"
+        refresh_client_config
+        return $?
+    fi
+    if check_snell_running; then
+        was_running=1
+    elif ! check_snell_stopped; then
+        fail "服务正在切换状态或无法确认状态，请稍后重试"
+        return 1
+    fi
+
+    # 先生成两端配置，避免地址查询或配置校验失败时改动正在使用的模式。
+    old_server=$(cat /etc/snell/snell-server.conf) || return 1
+    if [ -f /etc/snell/snell-client.conf ]; then
+        old_client=$(cat /etc/snell/snell-client.conf) || return 1
+        had_client=1
+    fi
+    new_server=$(render_server_mode "$selected_mode") || {
+        fail "服务端配置必须包含唯一的 [snell-server] 节"; return 1;
+    }
+    new_client=$(render_client_config "$selected_mode") || return 1
+
+    # 原内容仅暂存在内存中，失败时恢复；不创建备份文件。
+    restore_mode_on_failure() {
+        local failed=0
+        (( server_written || client_written )) || return 0
+        trap '' INT TERM
+        if (( server_written )); then
+            write_file /etc/snell/snell-server.conf 640 root:snell <<< "$old_server" || failed=1
+        fi
+        if (( client_written )); then
+            if (( had_client )); then
+                write_file /etc/snell/snell-client.conf 600 root:root <<< "$old_client" || failed=1
+            else
+                rm -f /etc/snell/snell-client.conf || failed=1
+            fi
+        fi
+        if (( was_running && restart_attempted && !failed )); then
+            restart_snell || failed=1
+        fi
+        if (( failed )); then
+            fail "切换失败，自动恢复未完成；请检查服务端与客户端配置，并通过菜单 6、7 排查"
+        else
+            echo -e "${YELLOW}切换未完成，已恢复原配置${RESET}" >&2
+        fi
+    }
+    trap restore_mode_on_failure EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    write_file /etc/snell/snell-server.conf 640 root:snell <<< "$new_server" || return 1
+    server_written=1
+    write_file /etc/snell/snell-client.conf 600 root:root <<< "$new_client" || return 1
+    client_written=1
+    if (( was_running )); then
+        restart_attempted=1
+        restart_snell || return 1
+    fi
+    trap - EXIT INT TERM
+    if (( was_running )); then
+        echo -e "${GREEN}Snell 模式已切换为 ${selected_mode}，服务已重启${RESET}"
+    else
+        echo -e "${GREEN}Snell 模式已保存为 ${selected_mode}，服务保持停止；通过菜单 3 启动后生效${RESET}"
+    fi
+    echo -e "${YELLOW}请将客户端条目同步为以下配置，客户端与服务端的 mode 必须一致：${RESET}"
+    printf '%s\n' "$new_client"
+)
 
 choose_port() {
     local port listeners attempt
@@ -528,6 +646,7 @@ show_menu() {
     echo "6. 查看 Snell 状态"
     echo "7. 查看 Snell 日志"
     echo "8. 查看 Snell 配置"
+    echo "9. 切换 Snell 模式"
     echo "0. 退出"
     echo -e "${GREEN}======================${RESET}"
     read -r -p "请输入选项编号: " choice || return 1
@@ -586,6 +705,9 @@ main() {
                 ;;
             8)
                 refresh_client_config
+                ;;
+            9)
+                switch_snell_mode
                 ;;
             0)
                 echo -e "${GREEN}已退出 Snell 管理工具${RESET}"
