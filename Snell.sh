@@ -171,13 +171,17 @@ config_value() {
             }
         }
         END { if (found) print value; else exit 1 }
-    ' /etc/snell/snell-server.conf
+    ' "${2:-/etc/snell/snell-server.conf}"
 }
 
 render_client_config() {
-    local listen port psk mode="${1:-}" address="" label=""
+    local listen port psk mode server_config address="" label=""
     [ -f /etc/snell/snell-server.conf ] || { fail "服务端配置不存在"; return 1; }
-    listen=$(config_value listen) && psk=$(config_value psk) || {
+    if [ "$#" -gt 0 ]; then server_config="$1"; else
+        server_config=$(cat /etc/snell/snell-server.conf) || return 1
+    fi
+    listen=$(config_value listen /dev/stdin <<< "$server_config") &&
+        psk=$(config_value psk /dev/stdin <<< "$server_config") || {
         fail "服务端配置缺少 listen 或 psk"; return 1;
     }
     listen=${listen%%,*}
@@ -185,7 +189,7 @@ render_client_config() {
     port=${listen##*:}
     [[ "$port" =~ ^[0-9]{1,5}$ ]] && (( 10#$port >= 1 && 10#$port <= 65535 )) &&
         [ -n "$psk" ] || { fail "服务端端口或 PSK 无效"; return 1; }
-    if [ -z "$mode" ]; then mode=$(config_value mode) || mode=default; fi
+    mode=$(config_value mode /dev/stdin <<< "$server_config") || mode=default
     case "$mode" in
         default|unshaped|unsafe-raw) ;;
         *) fail "服务端 mode 无效"; return 1 ;;
@@ -214,36 +218,157 @@ refresh_client_config() {
     printf '%s\n' "$client_config"
 }
 
-render_server_mode() {
-    case "$1" in
-        default|unshaped|unsafe-raw) ;;
-        *) fail "Snell 模式无效"; return 1 ;;
+valid_port() {
+    [[ "$1" =~ ^[0-9]{1,5}$ ]] && (( 10#$1 >= 1 && 10#$1 <= 65535 ))
+}
+
+ipv6_available() {
+    local disabled address
+    [ -r /proc/sys/net/ipv6/conf/all/disable_ipv6 ] &&
+        read -r disabled < /proc/sys/net/ipv6/conf/all/disable_ipv6 &&
+        [ "$disabled" = 0 ] &&
+        [ -r /proc/net/if_inet6 ] &&
+        read -r address < /proc/net/if_inet6 && [ -n "$address" ]
+}
+
+auto_listen_address() {
+    valid_port "$1" || return 1
+    if ipv6_available; then
+        printf '0.0.0.0:%s,[::]:%s\n' "$1" "$1"
+    else
+        printf '0.0.0.0:%s\n' "$1"
+    fi
+}
+
+listen_with_port() {
+    local listen="$1" port="$2" old_port address result=""
+    local -a addresses
+    valid_port "$port" || return 1
+    listen=${listen//[[:space:]]/}
+    old_port=${listen%%,*}; old_port=${old_port##*:}
+    case "$listen" in
+        "0.0.0.0:$old_port"|"[::]:$old_port"|"0.0.0.0:$old_port,[::]:$old_port"|"[::]:$old_port,0.0.0.0:$old_port")
+            auto_listen_address "$port"; return $? ;;
     esac
-    # 只更新目标节的 mode；缺失时补上，重复项合并，其他配置原样保留。
-    awk -v mode="$1" '
+    # 自定义绑定地址保留，只替换每个地址的端口。
+    IFS=, read -r -a addresses <<< "$listen"
+    for address in "${addresses[@]}"; do
+        [[ "$address" == *:* ]] && valid_port "${address##*:}" || return 1
+        result+="${result:+,}${address%:*}:$port"
+    done
+    [ -n "$result" ] || return 1
+    printf '%s\n' "$result"
+}
+
+render_server_setting() {
+    local key="$1" value="$2"
+    case "$key:$value" in
+        mode:default|mode:unshaped|mode:unsafe-raw) ;;
+        dns-ip-preference:default|dns-ip-preference:prefer-ipv4|dns-ip-preference:prefer-ipv6|dns-ip-preference:ipv4-only|dns-ip-preference:ipv6-only) ;;
+        listen:*) [[ -n "$value" && "$value" != *$'\n'* && "$value" != *$'\r'* ]] || return 1 ;;
+        *) fail "Snell 配置值无效"; return 1 ;;
+    esac
+    # 缺失时补上，重复项合并，只修改唯一的 snell-server 节。
+    awk -v key="$key" -v value="$value" '
         /^[[:space:]]*\[/ {
             section=$0
             sub(/[[:space:]]*[#;].*$/, "", section)
             gsub(/[[:space:]]/, "", section)
             active=(section == "[snell-server]")
             print
-            if (active) { sections++; print "mode = " mode }
+            if (active) { sections++; print key " = " value }
             next
         }
-        active && /^[[:space:]]*mode[[:space:]]*=/ { next }
+        active && /^[[:space:]]*[^#;][^=]*=/ {
+            name=$0; sub(/=.*/, "", name)
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", name)
+            if (name == key) next
+            if (key == "dns-ip-preference" && name == "ipv-preference") next
+        }
         { print }
         END { if (sections != 1) exit 1 }
     ' /etc/snell/snell-server.conf
 }
 
-switch_snell_mode() (
-    local current_mode selection selected_mode was_running=0
-    local old_server old_client="" new_server new_client had_client=0
+apply_snell_setting() (
+    local key="$1" value="$2" label="$3" sync_client="${4:-1}" was_running=0
+    local old_server old_client="" new_server new_client="" had_client=0
     local server_written=0 client_written=0 restart_attempted=0
-    if ! check_snell_installed || [ ! -f /etc/snell/snell-server.conf ]; then
-        fail "Snell 尚未安装或服务端配置不存在，请先安装"
+    if check_snell_running; then
+        was_running=1
+    elif ! check_snell_stopped; then
+        fail "服务正在切换状态或无法确认状态，请稍后重试"
         return 1
     fi
+    old_server=$(cat /etc/snell/snell-server.conf) || return 1
+    new_server=$(render_server_setting "$key" "$value") || {
+        fail "配置值无效或服务端缺少唯一的 [snell-server] 节"; return 1;
+    }
+    if (( sync_client )); then
+        if [ -f /etc/snell/snell-client.conf ]; then
+            old_client=$(cat /etc/snell/snell-client.conf) || return 1
+            had_client=1
+        fi
+        new_client=$(render_client_config "$new_server") || return 1
+    fi
+    # 原内容仅暂存在内存中，失败时恢复；不创建备份文件。
+    restore_config_on_failure() {
+        local failed=0
+        (( server_written || client_written )) || return 0
+        trap '' INT TERM
+        if (( server_written )); then
+            write_file /etc/snell/snell-server.conf 640 root:snell <<< "$old_server" || failed=1
+        fi
+        if (( client_written )); then
+            if (( had_client )); then
+                write_file /etc/snell/snell-client.conf 600 root:root <<< "$old_client" || failed=1
+            else
+                rm -f /etc/snell/snell-client.conf || failed=1
+            fi
+        fi
+        if (( was_running && restart_attempted && !failed )); then
+            restart_snell || failed=1
+        fi
+        if (( failed )); then
+            fail "修改失败，自动恢复未完成；请检查服务端与客户端配置，并通过菜单 6、7 排查"
+        else
+            echo -e "${YELLOW}修改未完成，已恢复原配置${RESET}" >&2
+        fi
+    }
+    trap restore_config_on_failure EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    write_file /etc/snell/snell-server.conf 640 root:snell <<< "$new_server" || return 1
+    server_written=1
+    if (( sync_client )); then
+        write_file /etc/snell/snell-client.conf 600 root:root <<< "$new_client" || return 1
+        client_written=1
+    fi
+    if (( was_running )); then
+        restart_attempted=1
+        restart_snell || return 1
+    fi
+    trap - EXIT INT TERM
+    if (( was_running )); then
+        echo -e "${GREEN}Snell ${label}已更改为 ${value}，服务已重启${RESET}"
+    else
+        echo -e "${GREEN}Snell ${label}已保存为 ${value}，服务保持停止；通过菜单 3 启动后生效${RESET}"
+    fi
+    if (( sync_client )); then
+        echo -e "${YELLOW}请同步客户端条目：${RESET}"
+        printf '%s\n' "$new_client"
+    fi
+)
+
+require_snell_config() {
+    check_snell_installed && [ -f /etc/snell/snell-server.conf ] || {
+        fail "Snell 尚未安装或服务端配置不存在，请先安装"; return 1;
+    }
+}
+
+switch_snell_mode() {
+    local current_mode selection selected_mode
+    require_snell_config || return 1
     current_mode=$(config_value mode) || current_mode=default
     echo -e "${GREEN}=== 切换 Snell 模式 ===${RESET}"
     printf '当前配置模式: %s\n' "$current_mode"
@@ -264,68 +389,100 @@ switch_snell_mode() (
         refresh_client_config
         return $?
     fi
-    if check_snell_running; then
-        was_running=1
-    elif ! check_snell_stopped; then
-        fail "服务正在切换状态或无法确认状态，请稍后重试"
-        return 1
-    fi
+    apply_snell_setting mode "$selected_mode" "模式"
+}
 
-    # 先生成两端配置，避免地址查询或配置校验失败时改动正在使用的模式。
-    old_server=$(cat /etc/snell/snell-server.conf) || return 1
-    if [ -f /etc/snell/snell-client.conf ]; then
-        old_client=$(cat /etc/snell/snell-client.conf) || return 1
-        had_client=1
+change_snell_port() {
+    local listen current_port port listeners new_listen
+    require_snell_config || return 1
+    listen=$(config_value listen) || return 1
+    current_port=${listen%%,*}; current_port=${current_port//[[:space:]]/}; current_port=${current_port##*:}
+    printf '当前监听地址: %s\n' "$listen"
+    read -r -p "请输入新端口（1-65535，留空返回）: " port || return 0
+    [ -n "$port" ] || return 0
+    valid_port "$port" || { fail "端口无效，请输入 1-65535 的整数"; return 1; }
+    port=$((10#$port))
+    # 运行中的当前端口属于本服务；其余情况都检查 TCP 占用。
+    if [ "$port" != "$current_port" ] || ! check_snell_running; then
+        listeners=$(ss -H -ltn) || { fail "无法检查端口占用"; return 1; }
+        if awk -v port="$port" '$4 ~ (":" port "$") {found=1} END {exit !found}' <<< "$listeners"; then
+            fail "TCP 端口 ${port} 已被占用，请更换端口"
+            return 1
+        fi
     fi
-    new_server=$(render_server_mode "$selected_mode") || {
-        fail "服务端配置必须包含唯一的 [snell-server] 节"; return 1;
-    }
-    new_client=$(render_client_config "$selected_mode") || return 1
+    new_listen=$(listen_with_port "$listen" "$port") || { fail "监听地址格式无效"; return 1; }
+    apply_snell_setting listen "$new_listen" "监听地址" || return 1
+    echo "请在云安全组和系统防火墙中放行 TCP 端口 ${port}。"
+}
 
-    # 原内容仅暂存在内存中，失败时恢复；不创建备份文件。
-    restore_mode_on_failure() {
-        local failed=0
-        (( server_written || client_written )) || return 0
-        trap '' INT TERM
-        if (( server_written )); then
-            write_file /etc/snell/snell-server.conf 640 root:snell <<< "$old_server" || failed=1
-        fi
-        if (( client_written )); then
-            if (( had_client )); then
-                write_file /etc/snell/snell-client.conf 600 root:root <<< "$old_client" || failed=1
-            else
-                rm -f /etc/snell/snell-client.conf || failed=1
-            fi
-        fi
-        if (( was_running && restart_attempted && !failed )); then
-            restart_snell || failed=1
-        fi
-        if (( failed )); then
-            fail "切换失败，自动恢复未完成；请检查服务端与客户端配置，并通过菜单 6、7 排查"
-        else
-            echo -e "${YELLOW}切换未完成，已恢复原配置${RESET}" >&2
-        fi
-    }
-    trap restore_mode_on_failure EXIT
-    trap 'exit 130' INT
-    trap 'exit 143' TERM
-    write_file /etc/snell/snell-server.conf 640 root:snell <<< "$new_server" || return 1
-    server_written=1
-    write_file /etc/snell/snell-client.conf 600 root:root <<< "$new_client" || return 1
-    client_written=1
-    if (( was_running )); then
-        restart_attempted=1
-        restart_snell || return 1
+switch_snell_dns() {
+    local current selection preference
+    require_snell_config || return 1
+    if current=$(config_value dns-ip-preference); then :
+    elif current=$(config_value ipv-preference); then :
+    elif [ "$(config_value ipv6)" = false ]; then current=ipv4-only
+    else current=default
     fi
-    trap - EXIT INT TERM
-    if (( was_running )); then
-        echo -e "${GREEN}Snell 模式已切换为 ${selected_mode}，服务已重启${RESET}"
+    printf '当前 DNS 模式: %s\n' "$current"
+    echo "1. default（默认）"
+    echo "2. prefer-ipv4（优先 IPv4）"
+    echo "3. prefer-ipv6（优先 IPv6）"
+    echo "4. ipv4-only（仅 IPv4）"
+    echo "5. ipv6-only（仅 IPv6）"
+    echo "0. 返回"
+    read -r -p "请选择 DNS 模式: " selection || return 0
+    case "$selection" in
+        1) preference=default ;;
+        2) preference=prefer-ipv4 ;;
+        3) preference=prefer-ipv6 ;;
+        4) preference=ipv4-only ;;
+        5) preference=ipv6-only ;;
+        0|"") return 0 ;;
+        *) fail "无效的选项"; return 1 ;;
+    esac
+    if [ "$preference" = "$current" ]; then
+        echo "当前已配置此 DNS 模式"
+        return 0
+    fi
+    apply_snell_setting dns-ip-preference "$preference" "DNS 模式" 0
+}
+
+change_snell_config() {
+    local selection
+    require_snell_config || return 1
+    echo -e "${GREEN}=== 更改 Snell 配置 ===${RESET}"
+    echo "1. 端口"
+    echo "2. 模式"
+    echo "3. DNS"
+    echo "0. 返回"
+    read -r -p "请选择配置项: " selection || return 0
+    case "$selection" in
+        1) change_snell_port ;;
+        2) switch_snell_mode ;;
+        3) switch_snell_dns ;;
+        0|"") return 0 ;;
+        *) fail "无效的选项"; return 1 ;;
+    esac
+}
+
+auto_listen_for_existing() {
+    local original="$1" listen port desired
+    listen=${original//[[:space:]]/}
+    port=${listen%%,*}; port=${port##*:}
+    case "$listen" in
+        "0.0.0.0:$port"|"[::]:$port"|"0.0.0.0:$port,[::]:$port"|"[::]:$port,0.0.0.0:$port") ;;
+        *) printf '%s\n' "$original"; return 0 ;;
+    esac
+    desired=$(auto_listen_address "$port") || return 1
+    # 已有双栈配置的地址顺序保留。
+    if [ "$desired" = "0.0.0.0:$port,[::]:$port" ] && [ "$listen" = "[::]:$port,0.0.0.0:$port" ]; then
+        printf '%s\n' "$original"
+    elif [ "$desired" = "$listen" ]; then
+        printf '%s\n' "$original"
     else
-        echo -e "${GREEN}Snell 模式已保存为 ${selected_mode}，服务保持停止；通过菜单 3 启动后生效${RESET}"
+        printf '%s\n' "$desired"
     fi
-    echo -e "${YELLOW}请将客户端条目同步为以下配置，客户端与服务端的 mode 必须一致：${RESET}"
-    printf '%s\n' "$new_client"
-)
+}
 
 choose_port() {
     local port listeners attempt
@@ -483,6 +640,7 @@ install_snell() {
     install_required_packages || return 1
     replace_snell_binary || return 1
     RANDOM_PORT=$(choose_port) || return 1
+    LISTEN_ADDRESS=$(auto_listen_address "$RANDOM_PORT") || return 1
     RANDOM_PSK=$(LC_ALL=C tr -dc A-Za-z0-9 </dev/urandom | head -c 48)
     [ "${#RANDOM_PSK}" -eq 48 ] || { fail "生成 PSK 失败"; return 1; }
 
@@ -501,7 +659,7 @@ install_snell() {
     write_file /etc/snell/snell-server.conf 640 root:snell << EOF || return 1
 [snell-server]
 mode = default
-listen = 0.0.0.0:${RANDOM_PORT}
+listen = ${LISTEN_ADDRESS}
 psk = ${RANDOM_PSK}
 dns-ip-preference = default
 EOF
@@ -545,7 +703,7 @@ EOF
 }
 
 update_snell() {
-    local was_running=0
+    local was_running=0 listen new_listen
     if [ ! -f "/usr/local/bin/snell-server" ]; then
         echo -e "${YELLOW}Snell 未安装，跳过更新${RESET}"
         return
@@ -565,7 +723,11 @@ update_snell() {
     if [ "$(get_system_type)" = alpine ]; then
         write_openrc_service || return 1
     fi
-    if (( was_running )); then
+    listen=$(config_value listen) || { fail "无法读取监听地址"; return 1; }
+    new_listen=$(auto_listen_for_existing "$listen") || { fail "无法生成监听地址"; return 1; }
+    if [ "$new_listen" != "$listen" ]; then
+        apply_snell_setting listen "$new_listen" "监听地址" 0 || return 1
+    elif (( was_running )); then
         restart_snell || {
             echo -e "${RED}新程序已替换，但重启失败；请通过菜单 7 排查。未创建备份。${RESET}"
             return 1
@@ -646,7 +808,7 @@ show_menu() {
     echo "6. 查看 Snell 状态"
     echo "7. 查看 Snell 日志"
     echo "8. 查看 Snell 配置"
-    echo "9. 切换 Snell 模式"
+    echo "9. 更改 Snell 配置"
     echo "0. 退出"
     echo -e "${GREEN}======================${RESET}"
     read -r -p "请输入选项编号: " choice || return 1
@@ -707,7 +869,7 @@ main() {
                 refresh_client_config
                 ;;
             9)
-                switch_snell_mode
+                change_snell_config
                 ;;
             0)
                 echo -e "${GREEN}已退出 Snell 管理工具${RESET}"

@@ -46,7 +46,7 @@ v6 retains Snell's focus on performance and compatibility:
 | **UDP over TCP** | Relays UDP through the TCP connection, simplifying inbound firewall rules |
 | **Flexible network controls** | DNS address-family preferences and multiple listening addresses |
 
-See the [official release notes](https://kb.nssurge.com/surge-knowledge-base/release-notes/snell) for protocol and mode details. Multiple listening addresses are configurable in the core; this installer listens on IPv4 by default.
+See the [official release notes](https://kb.nssurge.com/surge-knowledge-base/release-notes/snell) for protocol and mode details. The installer detects the IPv6 stack and configures IPv4 or IPv4 / IPv6 listeners automatically.
 
 ## From protocol to deployment
 
@@ -54,7 +54,7 @@ See the [official release notes](https://kb.nssurge.com/surge-knowledge-base/rel
 
 - **Ready after installation**: dependencies, a random port, a 48-character random PSK and a Surge proxy entry are prepared for you.
 - **Three Linux systems**: systemd on Debian / Ubuntu and OpenRC on Alpine, with AMD64 and ARM64 support.
-- **One management menu**: installation, service controls, logs, mode switching and client configuration export.
+- **One management menu**: installation, service controls, logs, port / mode / DNS settings and client configuration export.
 - **Verified outcomes**: binary execution and service-state checks, with the running or stopped state preserved during updates.
 
 > The installer currently downloads the official **v6.0.0rc2** test release. It uses `mode=default` with AES encryption and traffic shaping. Your client must support Snell v6 and use the same mode as the server.
@@ -82,6 +82,8 @@ bash -c 'bash <(curl -fsSL https://snell-ten.vercel.app)'
 
 Allow the actual listening port in both your cloud security group and server firewall. v6 relays UDP over TCP; no additional inbound UDP port is required for that relay.
 
+When the IPv6 stack is enabled and an IPv6 address exists, the installer uses `0.0.0.0:PORT,[::]:PORT`; otherwise it listens on IPv4 only. Option **4** checks again when updating an existing installation and preserves manually bound addresses. Public IPv6 access also requires a public IPv6 address and the corresponding firewall rules. Generated client entries use the server's IPv4 address by default.
+
 ## Connect with Surge
 
 Copy the generated proxy entry into the `[Proxy]` section of your Surge configuration:
@@ -95,9 +97,22 @@ The address, port and PSK above are placeholders. Use the actual entry printed a
 
 Option **8** reads the current server port, PSK and mode while preserving the existing valid address and node name. After editing the server configuration, restart with **5**, then export with **8**.
 
-## Switch Snell modes
+## Change Snell configuration
 
-Choose **9 · Switch Snell mode** to view the configured mode and select:
+Choose **9 · Change Snell configuration**:
+
+| Submenu | Action |
+| :---: | :--- |
+| `1. Port` | Validate a new TCP port and update the client entry |
+| `2. Mode` | Choose encryption and traffic shaping behavior |
+| `3. DNS` | Choose the address-family preference for server DNS results |
+| `0. Return` | Return to the main menu |
+
+Ports must be in `1–65535`. Allow the new TCP port in your firewall and update your client after changing it. A running service is restarted and checked; a stopped service stays stopped. Failed writes or restarts trigger an attempt to restore the previous configuration without creating backup files.
+
+### Proxy mode
+
+Choose **9 → 2** to view the configured mode and select:
 
 | Option | Mode | Behavior and use |
 | :---: | :--- | :--- |
@@ -106,9 +121,23 @@ Choose **9 · Switch Snell mode** to view the configured mode and select:
 | `3` | `unsafe-raw` | Disables encryption and shaping; plaintext transport for an intranet or an existing secure tunnel only |
 | `0` | Return | Keep the current configuration |
 
-Switching preserves the port, PSK and other server settings and regenerates the client entry. A running service is restarted and checked; a stopped service stays stopped until you start it. Failed writes or restarts trigger an attempt to restore the previous configuration without creating backup files.
+Mode switching preserves the port, PSK and other server settings and regenerates the client entry.
 
 **Copy the new entry to Surge after switching: the client and server must use the same `mode`.** See the [official release notes](https://kb.nssurge.com/surge-knowledge-base/release-notes/snell) for mode definitions.
+
+### DNS preference
+
+Choose **9 → 3**:
+
+| Option | Value | Behavior |
+| :---: | :--- | :--- |
+| `1` | `default` | Use Snell's default policy |
+| `2` | `prefer-ipv4` | Prefer IPv4 results |
+| `3` | `prefer-ipv6` | Prefer IPv6 results |
+| `4` | `ipv4-only` | Use only IPv4 results |
+| `5` | `ipv6-only` | Use only IPv6 results |
+
+This changes the address-family preference when the server connects to a hostname. Existing DNS servers are preserved; system DNS is used when none is configured. IPv6-only results require working IPv6 egress. DNS preference is independent of inbound listeners, and changing it does not require a new client entry.
 
 ## Service management
 
@@ -124,7 +153,7 @@ Run the installation command again to open the menu.
 | `6` | View service status |
 | `7` | Follow logs on Debian / Ubuntu; show troubleshooting instructions on Alpine |
 | `8` | Regenerate and display the Surge proxy entry |
-| `9` | Switch Snell mode |
+| `9` | Change Snell configuration: port, mode and DNS |
 | `0` | Exit |
 
 <details>
@@ -155,7 +184,7 @@ For bug reports, include your OS, architecture, server and client versions, and 
 
 ---
 
-**Continuously checked** · Three-system CI installs the script's actual dependencies and covers failure-path regressions, mode switching and recovery, Alpine log suppression and cleanup, and real proxy traffic in all three modes through the official Snell v6 server. Service manager commands are mocked; validate your actual network path on your own deployment.
+**Continuously checked** · Three-system CI installs the script's actual dependencies and covers configuration changes and recovery, IPv6 detection and Alpine log suppression, plus real proxy traffic for all three protocol modes, IPv4 / IPv6 listeners, port changes and all five DNS preferences. Service manager commands are mocked; validate your actual network path on your own deployment.
 
 <div align="center">
 

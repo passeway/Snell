@@ -277,6 +277,7 @@ systemctl() {{ echo '{state}'; }}; stop_snell''', expected=1)
         for system in ('debian', 'alpine'):
             self.binary.write_text('old-core'); self.server_config()
             result = self.run_shell(f'''get_system_type() {{ echo {system}; }}
+ipv6_available() {{ :; }}
 check_snell_running() {{ return 1; }}
 service_action() {{ echo ACTION:"$1"; state=stopped; }}
 check_snell_stopped() {{ [ "$state" = stopped ]; }}
@@ -307,6 +308,7 @@ systemctl() {{ echo UNEXPECTED_DISABLE; }}; uninstall_snell''', expected=1)
                 for path in (log, cron, service):
                     path.write_text('old-content')
                 result = self.run_shell(f'''get_system_type() {{ echo {system}; }}
+ipv6_available() {{ :; }}
 check_snell_running() {{ return {0 if running else 1}; }}
 check_snell_stopped() {{ return {1 if running else 0}; }}
 install_required_packages() {{ :; }}
@@ -401,11 +403,11 @@ replace_snell_binary() { echo UNEXPECTED_REPLACE; }; update_snell''', expected=1
     def test_mode_switch_menu_keeps_existing_labels_and_dispatches_nine(self):
         result = self.run_shell('''check_root() { :; }; clear() { :; }
 check_snell_installed() { return 1; }; check_snell_running() { return 1; }
-switch_snell_mode() { echo MODE_MENU_CALLED; }; main''', '9\n\n0\n')
+change_snell_config() { echo CONFIG_MENU_CALLED; }; main''', '9\n\n0\n')
         self.assertIn('7. 查看 Snell 日志', result.stdout)
         self.assertIn('8. 查看 Snell 配置', result.stdout)
-        self.assertIn('9. 切换 Snell 模式', result.stdout)
-        self.assertIn('MODE_MENU_CALLED', result.stdout)
+        self.assertIn('9. 更改 Snell 配置', result.stdout)
+        self.assertIn('CONFIG_MENU_CALLED', result.stdout)
 
     def test_mode_switch_all_modes_on_both_service_managers(self):
         for system in ('debian', 'ubuntu', 'alpine'):
@@ -556,6 +558,154 @@ restart_snell() {
 switch_snell_mode''', '2\n', expected=143)
         self.assert_mode_files_unchanged(before)
         self.assertIn('已恢复原配置', result.stderr)
+
+
+    def test_configuration_submenu_routes_port_mode_and_dns(self):
+        self.prepare_mode_switch()
+        for selection, target in [('1', 'PORT'), ('2', 'MODE'), ('3', 'DNS')]:
+            result = self.run_shell('''check_snell_installed() { :; }
+change_snell_port() { echo CALL_PORT; }; switch_snell_mode() { echo CALL_MODE; }
+switch_snell_dns() { echo CALL_DNS; }; change_snell_config''', selection + '\n')
+            self.assertIn('1. 端口\n2. 模式\n3. DNS\n0. 返回', result.stdout)
+            self.assertIn('CALL_' + target, result.stdout)
+        for data, status in [('', 0), ('\n', 0), ('0\n', 0), ('8\n', 1)]:
+            before = self.server.read_bytes(), self.client.read_bytes()
+            self.run_shell('check_snell_installed() { :; }; change_snell_config', data, expected=status)
+            self.assert_mode_files_unchanged(before)
+
+    def test_ipv6_detection_and_automatic_listeners(self):
+        disabled = self.root / 'disable_ipv6'
+        addresses = self.root / 'if_inet6'
+        self.code = self.code.replace('/proc/sys/net/ipv6/conf/all/disable_ipv6', str(disabled))
+        self.code = self.code.replace('/proc/net/if_inet6', str(addresses))
+        for flag, address, expected in [('0', '00000000000000000000000000000001 lo', True),
+                                        ('1', '00000000000000000000000000000001 lo', False),
+                                        ('0', '', False), ('0', None, False), (None, None, False)]:
+            for path, text in [(disabled, flag), (addresses, address)]:
+                if text is None:
+                    path.unlink(missing_ok=True)
+                else:
+                    path.write_text(text + ('\n' if text else ''))
+            result = self.run_shell('auto_listen_address 40443')
+            self.assertEqual(result.stdout.strip(), '0.0.0.0:40443' + (',[::]:40443' if expected else ''))
+
+    def test_port_validation_and_listener_address_preservation(self):
+        for port in ('1', '65535', '00123'):
+            self.run_shell(f'valid_port {port}')
+        for port in ('0', '65536', '-1', '1.5', 'abc', '100000', ''):
+            self.run_shell('valid_port "' + port + '"', expected=1)
+        for available, expected in [(True, '0.0.0.0:12345,[::]:12345'), (False, '0.0.0.0:12345')]:
+            result = self.run_shell(f'ipv6_available() {{ return {0 if available else 1}; }}; listen_with_port "0.0.0.0:40443" 12345')
+            self.assertEqual(result.stdout.strip(), expected)
+        self.assertEqual(self.run_shell('listen_with_port "192.0.2.5:40443,[2001:db8::1]:40444" 12345').stdout.strip(),
+                         '192.0.2.5:12345,[2001:db8::1]:12345')
+
+    def test_port_change_updates_both_configs_and_preserves_service_state(self):
+        for running in (False, True):
+            for ipv6 in (False, True):
+                self.prepare_mode_switch(mode='unsafe-raw')
+                result = self.run_shell(f'''check_snell_installed() {{ :; }}
+check_snell_running() {{ return {0 if running else 1}; }}; check_snell_stopped() {{ :; }}
+ipv6_available() {{ return {0 if ipv6 else 1}; }}; ss() {{ :; }}
+restart_snell() {{ echo RESTARTED; }}; change_snell_port''', '01234\n')
+                self.assertIn('listen = 0.0.0.0:1234' + (',[::]:1234' if ipv6 else '') + '\n', self.server.read_text())
+                self.assertIn('mode = unsafe-raw', self.server.read_text())
+                self.assertIn('HK = snell, 203.0.113.1, 1234, psk=ChangedSecret=123456789', self.client.read_text())
+                self.assertIn('mode=unsafe-raw', self.client.read_text())
+                self.assertEqual('RESTARTED' in result.stdout, running)
+
+    def test_port_change_rejects_occupied_ports_and_ss_errors(self):
+        for ss in ['echo "LISTEN 0 128 0.0.0.0:1234 0.0.0.0:*"',
+                   'echo "LISTEN 0 128 [::]:1234 [::]:*"', 'return 1']:
+            before = self.prepare_mode_switch()
+            self.run_shell('check_snell_installed() { :; }; ss() { ' + ss + '; }; change_snell_port',
+                           '1234\n', expected=1)
+            self.assert_mode_files_unchanged(before)
+        for data, status in [('', 0), ('\n', 0), ('65536\n', 1), ('0\n', 1), ('hello\n', 1)]:
+            before = self.prepare_mode_switch()
+            self.run_shell('check_snell_installed() { :; }; change_snell_port', data, expected=status)
+            self.assert_mode_files_unchanged(before)
+
+    def test_port_change_same_running_port_allows_dual_stack_upgrade(self):
+        self.prepare_mode_switch()
+        self.server.write_text(self.server.read_text().replace('[::]:40443,0.0.0.0:40443', '0.0.0.0:40443'))
+        result = self.run_shell('''check_snell_installed() { :; }; check_snell_running() { :; }
+ipv6_available() { :; }; ss() { echo UNEXPECTED_PORT_SCAN; return 1; }
+restart_snell() { :; }; change_snell_port''', '40443\n')
+        self.assertIn('0.0.0.0:40443,[::]:40443', self.server.read_text())
+        self.assertNotIn('UNEXPECTED_PORT_SCAN', result.stdout)
+
+    def test_dns_modes_preserve_client_and_custom_dns_servers(self):
+        modes = ['default', 'prefer-ipv4', 'prefer-ipv6', 'ipv4-only', 'ipv6-only']
+        for running in (False, True):
+            for selection, mode in enumerate(modes, 1):
+                before = self.prepare_mode_switch('unshaped')
+                current = 'prefer-ipv6' if mode == 'default' else 'default'
+                with self.server.open('a') as out:
+                    out.write(f'dns-ip-preference = {current}\ndns = 192.0.2.53\n')
+                result = self.run_shell(f'''check_snell_installed() {{ :; }}
+check_snell_running() {{ return {0 if running else 1}; }}; check_snell_stopped() {{ :; }}
+get_public_ip() {{ echo UNEXPECTED_LOOKUP >&2; return 1; }}
+restart_snell() {{ echo RESTARTED; }}; switch_snell_dns''', str(selection) + '\n')
+                self.assertIn(f'dns-ip-preference = {mode}\n', self.server.read_text())
+                self.assertIn('dns = 192.0.2.53', self.server.read_text())
+                self.assertIn('mode = unshaped', self.server.read_text())
+                self.assertEqual(self.client.read_bytes(), before[1])
+                self.assertEqual('RESTARTED' in result.stdout, running)
+                self.assertNotIn('UNEXPECTED_LOOKUP', result.stderr)
+
+    def test_dns_switch_supports_legacy_keys_and_cancellation(self):
+        for legacy in ('ipv6 = false', 'ipv-preference = prefer-ipv6'):
+            self.prepare_mode_switch()
+            with self.server.open('a') as out:
+                out.write(legacy + '\n')
+            self.run_shell('''check_snell_installed() { :; }; check_snell_running() { return 1; }
+check_snell_stopped() { :; }; switch_snell_dns''', '1\n')
+            self.assertIn('dns-ip-preference = default', self.server.read_text())
+            self.assertNotIn('ipv-preference = ', self.server.read_text())
+        for data, status in [('', 0), ('\n', 0), ('0\n', 0), ('6\n', 1), ('1\n', 0)]:
+            before = self.prepare_mode_switch()
+            self.run_shell('check_snell_installed() { :; }; switch_snell_dns', data, expected=status)
+            self.assert_mode_files_unchanged(before)
+
+    def test_network_setting_failures_restore_configs(self):
+        for action, data in [('change_snell_port', '1234\n'), ('switch_snell_dns', '5\n')]:
+            before = self.prepare_mode_switch()
+            result = self.run_shell('''check_snell_installed() { :; }; check_snell_running() { :; }
+ipv6_available() { :; }; ss() { :; }; attempts=0
+restart_snell() { attempts=$((attempts+1)); [ "$attempts" -gt 1 ]; }
+''' + action, data, expected=1)
+            self.assert_mode_files_unchanged(before)
+            self.assertIn('已恢复原配置', result.stderr)
+
+    def test_auto_listen_update_preserves_custom_addresses_and_ports(self):
+        for value in ['192.0.2.1:40443,[2001:db8::1]:40444', '0.0.0.0:40443,[::]:40444',
+                      '[::]:40443,0.0.0.0:40443']:
+            self.assertEqual(self.run_shell('ipv6_available() { :; }; auto_listen_for_existing "' + value + '"').stdout.strip(), value)
+        self.assertEqual(self.run_shell('ipv6_available() { :; }; auto_listen_for_existing "0.0.0.0:40443"').stdout.strip(),
+                         '0.0.0.0:40443,[::]:40443')
+        self.assertEqual(self.run_shell('ipv6_available() { return 1; }; auto_listen_for_existing "0.0.0.0:40443,[::]:40443"').stdout.strip(),
+                         '0.0.0.0:40443')
+
+    def test_update_applies_dual_stack_once_and_recovers_on_restart_failure(self):
+        for running, fails in [(False, False), (True, False), (True, True)]:
+            self.binary.write_text('old-core')
+            before = self.prepare_mode_switch()
+            self.server.write_text(self.server.read_text().replace('[::]:40443,0.0.0.0:40443', '0.0.0.0:40443'))
+            old_server = self.server.read_bytes()
+            result = self.run_shell(f'''check_snell_running() {{ return {0 if running else 1}; }}
+check_snell_stopped() {{ :; }}; ipv6_available() {{ :; }}
+install_required_packages() {{ :; }}; replace_snell_binary() {{ :; }}
+refresh_client_config() {{ :; }}; show_logs() {{ :; }}; attempts=0
+restart_snell() {{ attempts=$((attempts+1)); echo RESTARTED; [ {1 if fails else 0} -eq 0 ] || [ "$attempts" -gt 1 ]; }}
+update_snell''', expected=1 if fails else 0)
+            self.assertEqual(result.stdout.count('RESTARTED'), 2 if fails else int(running))
+            self.assertEqual(self.client.read_bytes(), before[1])
+            if fails:
+                self.assertEqual(self.server.read_bytes(), old_server)
+                self.assertNotIn('更新成功', result.stdout)
+            else:
+                self.assertIn('0.0.0.0:40443,[::]:40443', self.server.read_text())
 
 
 if __name__ == '__main__':
