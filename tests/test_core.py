@@ -98,6 +98,9 @@ class CoreTests(unittest.TestCase):
     def test_port_change_relays_real_traffic(self):
         self.check_mode_traffic('default', '1', change_port=True)
 
+    def test_different_ipv4_ipv6_ports_export_correct_client_port(self):
+        self.check_mode_traffic('default', '1', split_ports=True)
+
     def test_dns_preferences_choose_expected_address_family(self):
         for selection, preference, expected in [('1', 'default', None), ('2', 'prefer-ipv4', b'ipv4'),
                                                 ('3', 'prefer-ipv6', b'ipv6'), ('4', 'ipv4-only', b'ipv4'),
@@ -105,7 +108,7 @@ class CoreTests(unittest.TestCase):
             with self.subTest(preference=preference):
                 self.check_mode_traffic('default', '1', dns=(selection, preference, expected))
 
-    def check_mode_traffic(self, mode, selection, ipv6=True, dns=None, change_port=False):
+    def check_mode_traffic(self, mode, selection, ipv6=True, dns=None, change_port=False, split_ports=False):
         with tempfile.TemporaryDirectory(prefix='snell-core-') as td:
             root = Path(td)
             processes = []
@@ -149,6 +152,12 @@ class CoreTests(unittest.TestCase):
                                          'listen-test', str(script), str(port)],
                                         capture_output=True, text=True, check=True, timeout=5).stdout.strip()
                 self.assertEqual(listen, f'0.0.0.0:{port}' + (f',[::]:{port}' if ipv6 else ''))
+                ipv6_port = port
+                if split_ports:
+                    ipv6_port = free_port()
+                    while ipv6_port == port:
+                        ipv6_port = free_port()
+                    listen = f'[::]:{ipv6_port},0.0.0.0:{port}'
                 # Use the actual generated listening addresses and production config template.
                 config = SOURCE.read_text().split(
                     'write_file /etc/snell/snell-server.conf 640 root:snell << EOF || return 1\n', 1)[1].split('\nEOF', 1)[0]
@@ -178,6 +187,7 @@ check_snell_installed() { :; }; check_snell_running() { return 1; }
 check_snell_stopped() { :; }; chown() { :; }; change_snell_config''', 'port-test', str(script)],
                                    input='1\n' + str(new_port) + '\n', text=True, capture_output=True, check=True, timeout=10)
                     port = new_port
+                    ipv6_port = port
                 if dns:
                     subprocess.run(['bash', '-c', '''source "$1"
 check_snell_installed() { :; }; check_snell_running() { return 1; }
@@ -197,7 +207,7 @@ check_snell_stopped() { :; }; chown() { :; }; change_snell_config''', 'dns-test'
                     client_config = {
                         'log': {'level': 'warn'},
                         'inbounds': [{'type': 'mixed', 'listen': '127.0.0.1', 'listen_port': local_port}],
-                        'outbounds': [{'type': 'snell', 'server': peer, 'server_port': port,
+                        'outbounds': [{'type': 'snell', 'server': peer, 'server_port': ipv6_port if peer == '::1' else port,
                                        'version': 6, 'psk': fields['psk'], 'mode': fields['mode']}],
                     }
                     client_file = root / 'client.json'

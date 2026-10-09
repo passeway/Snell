@@ -26,9 +26,11 @@ class SnellTests(unittest.TestCase):
         os_release = self.root / 'os-release'
         os_release.write_text('ID=debian\n')
         self.code = self.code.replace('/etc/os-release', str(os_release))
+        self.code = self.code.replace('/run/snell-manager.lock', str(self.root / 'manager.lock'))
         self.code += '\nchown() { printf "%s\\n" "$*" >> "' + str(self.root / 'owners') + '"; }\n'
         # Keep download fixtures as shell functions; timeout itself is exercised separately.
         self.code += '\ntimeout() { [ "$1" != -k ] || shift 2; shift; "$@"; }\n'
+        self.code += '\neval "$(declare -f snell_listener_pid | sed \'1s/snell_listener_pid/real_snell_listener_pid/\')"\nsnell_listener_pid() { echo 123; }\n'
         self.server = self.root / 'etc/snell/snell-server.conf'
         self.client = self.root / 'etc/snell/snell-client.conf'
         self.binary = self.root / 'usr/local/bin/snell-server'
@@ -164,6 +166,7 @@ update_snell''', expected=1)
 
     def test_install_file_failure_stops_before_start(self):
         for failed_name in ['snell-server.conf', 'snell.service', 'snell']:
+            self.server.unlink(missing_ok=True)
             system = 'alpine' if failed_name == 'snell' else 'debian'
             result = self.run_shell(f'''
 get_system_type() {{ echo {system}; }}
@@ -255,8 +258,8 @@ start_snell''', expected=1)
     def test_start_allows_delayed_start_and_requires_stable_status(self):
         result = self.run_shell('''service_action() { :; }; sleep() { :; }
 checks=0
-check_snell_running() { checks=$((checks+1)); [ "$checks" -ge 3 ]; }
-start_snell && printf 'checks=%s\\n' "$checks"''')
+check_snell_running() { checks=$((checks+1)); printf 'checks=%s\\n' "$checks"; [ "$checks" -ge 3 ]; }
+start_snell''')
         self.assertIn('启动成功', result.stdout)
         self.assertIn('checks=5', result.stdout)
 
@@ -421,6 +424,7 @@ systemctl() {{
     case "$1" in
         is-active) return {0 if running else 3} ;;
         show) echo inactive ;;
+        reset-failed) return 0 ;;
         restart) echo RESTARTED ;;
         *) return 99 ;;
     esac
@@ -706,6 +710,151 @@ update_snell''', expected=1 if fails else 0)
                 self.assertNotIn('更新成功', result.stdout)
             else:
                 self.assertIn('0.0.0.0:40443,[::]:40443', self.server.read_text())
+
+    def test_repeat_install_preserves_existing_configuration_and_binary(self):
+        before = self.prepare_mode_switch('unsafe-raw')
+        self.binary.write_text('installed-core')
+        result = self.run_shell('''install_required_packages() { echo UNEXPECTED_CHANGE; }
+replace_snell_binary() { echo UNEXPECTED_CHANGE; }; restart_snell() { echo UNEXPECTED_CHANGE; }
+install_snell''')
+        self.assert_mode_files_unchanged(before)
+        self.assertEqual(self.binary.read_text(), 'installed-core')
+        self.assertIn('已取消重复安装', result.stdout)
+        self.assertNotIn('UNEXPECTED_CHANGE', result.stdout)
+        self.assertNotIn('安装成功', result.stdout)
+
+    def test_install_and_update_directory_permissions_ignore_umask(self):
+        self.server.parent.rmdir()
+        self.run_shell('''umask 077
+install_required_packages() { :; }; replace_snell_binary() { :; }; choose_port() { echo 32000; }
+id() { :; }; systemctl() { :; }; restart_snell() { :; }; show_logs() { :; }
+get_public_ip() { echo 203.0.113.1; }; get_country() { echo Test; }; install_snell''')
+        self.assertEqual(self.server.parent.stat().st_mode & 0o777, 0o750)
+        self.assertEqual(self.server.stat().st_mode & 0o777, 0o640)
+        self.assertEqual(self.client.stat().st_mode & 0o777, 0o600)
+        self.assertIn('root:snell ' + str(self.server.parent), (self.root / 'owners').read_text())
+        self.server.parent.chmod(0o700)
+        self.run_shell('secure_config_files')
+        self.assertEqual(self.server.parent.stat().st_mode & 0o777, 0o750)
+
+    def test_export_selects_ipv4_listener_instead_of_first_listener(self):
+        self.prepare_mode_switch()
+        for listen, expected in [('[::]:41000,0.0.0.0:42000', '42000'),
+                                 ('0.0.0.0:42000,[::]:41000', '42000'),
+                                 ('[::]:41000,192.168.1.2:43000', '43000'),
+                                 ('0.0.0.0:42000,203.0.113.1:44000', '44000')]:
+            self.server.write_text('[snell-server]\nlisten = ' + listen + '\npsk = TestSecret123456\n')
+            self.run_shell('get_public_ip() { echo UNEXPECTED; return 1; }; refresh_client_config')
+            self.assertEqual(self.client.read_text().split(',')[2].strip(), expected)
+
+    def test_ambiguous_or_ipv6_only_listener_keeps_existing_client(self):
+        for listen in ('[::]:41000', '192.168.1.2:42000,192.168.1.3:43000'):
+            self.prepare_mode_switch()
+            before = self.client.read_bytes()
+            self.server.write_text('[snell-server]\nlisten = ' + listen + '\npsk = TestSecret123456\n')
+            self.run_shell('refresh_client_config', expected=1)
+            self.assertEqual(self.client.read_bytes(), before)
+
+    def test_concurrent_operations_are_rejected_then_can_retry(self):
+        self.prepare_mode_switch('default')
+        ready, release = self.root / 'ready', self.root / 'release'
+        body = f'''check_snell_installed() {{ :; }}; check_snell_running() {{ return 1; }}
+check_snell_stopped() {{ :; }}; ipv6_available() {{ :; }}; ss() {{ :; }}
+eval "$(declare -f write_file | sed '1s/write_file/original_write_file/')"
+write_file() {{
+    if [ "$1" = '{self.server}' ]; then
+        touch '{ready}'
+        while [ ! -f '{release}' ]; do sleep .02; done
+    fi
+    original_write_file "$@"
+}}
+change_snell_port'''
+        process = subprocess.Popen(['bash', '-c', self.code + '\n' + body],
+                                   stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                   text=True, start_new_session=True)
+        try:
+            process.stdin.write('33333\n'); process.stdin.flush(); process.stdin.close(); process.stdin = None
+            deadline = time.monotonic() + 3
+            while not ready.exists() and time.monotonic() < deadline:
+                time.sleep(.02)
+            self.assertTrue(ready.exists())
+            for action in ('switch_snell_mode', 'switch_snell_dns', 'change_snell_port',
+                           'refresh_client_config', 'install_snell', 'update_snell',
+                           'uninstall_snell', 'start_snell', 'stop_snell', 'restart_snell'):
+                result = self.run_shell(action, '2\n', expected=1)
+                self.assertIn('另一个 Snell 管理操作', result.stderr)
+            release.touch()
+            stdout, stderr = process.communicate(timeout=5)
+            self.assertEqual(process.returncode, 0, stdout + stderr)
+            self.run_shell('''check_snell_installed() { :; }; check_snell_running() { return 1; }
+check_snell_stopped() { :; }; switch_snell_mode''', '2\n')
+            self.assertIn('mode = unshaped', self.server.read_text())
+            self.assertIn('33333', self.server.read_text())
+            self.assertIn('33333', self.client.read_text())
+        finally:
+            if process.poll() is None:
+                os.killpg(process.pid, signal.SIGKILL)
+                process.communicate()
+
+    def test_operation_lock_released_after_failure_and_signal(self):
+        self.run_shell('with_snell_lock false', expected=1)
+        self.run_shell('with_snell_lock true')
+        self.run_shell('terminate_self() { kill -TERM "$BASHPID"; }; with_snell_lock terminate_self', expected=143)
+        self.run_shell('with_snell_lock true')
+
+    def test_service_process_does_not_inherit_operation_lock(self):
+        result = self.run_shell('''get_system_type() { echo alpine; }
+rc-service() {
+    [ ! -e "/proc/$BASHPID/fd/$SNELL_LOCK_FD" ] || return 1
+    sleep 1 >/dev/null 2>&1 &
+}
+with_snell_lock service_action start && with_snell_lock true''')
+        self.assertNotIn('另一个', result.stderr)
+
+    def test_start_rejects_supervisor_without_healthy_child(self):
+        result = self.run_shell('''service_action() { :; }; sleep() { :; }; show_logs() { :; }
+check_snell_running() { :; }; snell_listener_pid() { return 1; }; start_snell''', expected=1)
+        self.assertNotIn('启动成功', result.stdout)
+
+    def test_start_requires_same_pid_across_successive_checks(self):
+        counter = self.root / 'pid_counter'
+        result = self.run_shell(f'''service_action() {{ :; }}; sleep() {{ :; }}; show_logs() {{ :; }}
+check_snell_running() {{ :; }}
+snell_listener_pid() {{ local n=100; [ ! -f '{counter}' ] || read -r n < '{counter}'; echo $((n+1)) > '{counter}'; echo "$n"; }}
+start_snell''', expected=1)
+        self.assertNotIn('启动成功', result.stdout)
+
+    def test_listener_health_checks_all_families_and_service_pid(self):
+        self.server_config()
+        for ipv4_pid, ipv6_pid, binary_ok, expected in [(123, 123, True, 0), (123, 456, True, 1),
+                                                      (456, 123, True, 1), (123, 0, True, 1),
+                                                      (123, 123, False, 1)]:
+            body = f'''snell_service_pid() {{ echo 123; }}
+readlink() {{ echo '{self.binary if binary_ok else "/other/program"}'; }}
+ss() {{
+    if [ "$2" = -4 ]; then echo 'LISTEN 0 128 0.0.0.0:40443 0.0.0.0:* users:(("snell-server",pid={ipv4_pid},fd=4))'
+    elif [ {ipv6_pid} -gt 0 ]; then echo 'LISTEN 0 128 [::]:40443 [::]:* users:(("snell-server",pid={ipv6_pid},fd=5))'
+    fi
+}}
+real_snell_listener_pid'''
+            self.run_shell(body, expected=expected)
+
+    def test_listener_health_recognizes_gcompat_only_with_mapped_snell(self):
+        self.server_config()
+        maps = self.root / 'process-maps'
+        self.code = self.code.replace('/proc/$pid/maps', str(maps))
+        for system, loader, mapped, permissions, expected in [
+                ('alpine', '/lib/ld-musl-x86_64.so.1', self.binary, 'r-xp', 0),
+                ('alpine', '/lib/ld-musl-aarch64.so.1', self.binary, 'r-xp', 0),
+                ('alpine', '/lib/ld-musl-x86_64.so.1', '/other/program', 'r-xp', 1),
+                ('alpine', '/lib/ld-musl-x86_64.so.1', self.binary, 'r--p', 1),
+                ('debian', '/lib/ld-musl-x86_64.so.1', self.binary, 'r-xp', 1)]:
+            maps.write_text(f'1000-2000 {permissions} 00000000 00:01 123 {mapped}\n')
+            self.run_shell(f'''get_system_type() {{ echo {system}; }}
+snell_service_pid() {{ echo 123; }}
+readlink() {{ echo {loader}; }}
+ss() {{ echo 'LISTEN 0 128 *:40443 *:* users:(("ld-musl",pid=123,fd=4))'; }}
+real_snell_listener_pid''', expected=expected)
 
 
 if __name__ == '__main__':
