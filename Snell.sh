@@ -8,6 +8,7 @@ BLUE='\033[0;34m'
 PURPLE='\033[0;35m'
 CYAN='\033[0;36m'
 RESET='\033[0m'
+unset SNELL_LOCK_FD
 
 get_system_type() {
     local ID
@@ -31,10 +32,10 @@ install_required_packages() {
     echo -e "${GREEN}安装必要软件包${RESET}"
     case "$(get_system_type)" in
         debian|ubuntu)
-            apt-get update && apt-get -o DPkg::Lock::Timeout=120 install -y wget unzip curl ca-certificates iproute2 coreutils
+            apt-get update && apt-get -o DPkg::Lock::Timeout=120 install -y wget unzip curl ca-certificates iproute2 coreutils util-linux
             ;;
         alpine)
-            apk add --no-cache bash wget unzip curl ca-certificates coreutils openrc gcompat libstdc++ iproute2
+            apk add --no-cache bash wget unzip curl ca-certificates coreutils openrc gcompat libstdc++ iproute2 flock
             ;;
         *) echo -e "${RED}仅支持 Debian、Ubuntu 和 Alpine${RESET}"; return 1 ;;
     esac
@@ -44,6 +45,28 @@ fail() {
     echo -e "${RED}$*${RESET}" >&2
     return 1
 }
+
+# 锁由内核随进程退出释放；不删除锁文件，避免两个进程锁住不同的 inode。
+with_snell_lock() (
+    local previous_umask
+    if [ -n "${SNELL_LOCK_FD:-}" ]; then "$@"; return $?; fi
+    if ! command -v flock >/dev/null; then
+        case "$(get_system_type)" in
+            alpine) apk add --no-cache flock || return 1 ;;
+            debian|ubuntu)
+                apt-get update && apt-get -o DPkg::Lock::Timeout=120 install -y util-linux || return 1 ;;
+            *) fail "无法安装操作锁依赖"; return 1 ;;
+        esac
+    fi
+    previous_umask=$(umask)
+    umask 077
+    exec {SNELL_LOCK_FD}>/run/snell-manager.lock || return 1
+    umask "$previous_umask"
+    flock -n "$SNELL_LOCK_FD" || {
+        fail "另一个 Snell 管理操作正在进行，请完成后重试"; return 1;
+    }
+    "$@"
+)
 
 # 同目录暂存后替换，避免磁盘满时留下被截断的配置；不保留备份。
 write_file() (
@@ -60,7 +83,12 @@ write_file() (
     fi
 )
 
+secure_config_directory() {
+    mkdir -p /etc/snell && chown root:snell /etc/snell && chmod 750 /etc/snell
+}
+
 secure_config_files() {
+    secure_config_directory || return 1
     if [ -f /etc/snell/snell-server.conf ]; then
         chown root:snell /etc/snell/snell-server.conf &&
             chmod 640 /etc/snell/snell-server.conf || return 1
@@ -175,7 +203,8 @@ config_value() {
 }
 
 render_client_config() {
-    local listen port psk mode server_config address="" label=""
+    local listen port psk mode server_config endpoint address="" label=""
+    local -a endpoints
     [ -f /etc/snell/snell-server.conf ] || { fail "服务端配置不存在"; return 1; }
     if [ "$#" -gt 0 ]; then server_config="$1"; else
         server_config=$(cat /etc/snell/snell-server.conf) || return 1
@@ -184,11 +213,11 @@ render_client_config() {
         psk=$(config_value psk /dev/stdin <<< "$server_config") || {
         fail "服务端配置缺少 listen 或 psk"; return 1;
     }
-    listen=${listen%%,*}
-    listen=${listen//[[:space:]]/}
-    port=${listen##*:}
-    [[ "$port" =~ ^[0-9]{1,5}$ ]] && (( 10#$port >= 1 && 10#$port <= 65535 )) &&
-        [ -n "$psk" ] || { fail "服务端端口或 PSK 无效"; return 1; }
+    [ -n "$psk" ] || { fail "服务端 PSK 无效"; return 1; }
+    IFS=, read -r -a endpoints <<< "${listen//[[:space:]]/}"
+    for endpoint in "${endpoints[@]}"; do
+        valid_port "${endpoint##*:}" || { fail "服务端端口无效"; return 1; }
+    done
     mode=$(config_value mode /dev/stdin <<< "$server_config") || mode=default
     case "$mode" in
         default|unshaped|unsafe-raw) ;;
@@ -202,6 +231,7 @@ render_client_config() {
     if ! valid_ipv4 "$address"; then
         address=$(get_public_ip) || { fail "服务已安装，但客户端地址未填写；可通过菜单 8 重试"; return 1; }
     fi
+    port=$(client_ipv4_port "$listen" "$address") || return 1
     if [ -z "$label" ] || [[ "$label" == *,* || "$label" == *$'\n'* ]]; then
         label=$(get_country "$address")
     fi
@@ -209,7 +239,9 @@ render_client_config() {
         "$label" "$address" "$port" "$psk" "$mode"
 }
 
-refresh_client_config() {
+refresh_client_config() { with_snell_lock _refresh_client_config "$@"; }
+
+_refresh_client_config() {
     local client_config
     client_config=$(render_client_config) || return 1
     write_file /etc/snell/snell-client.conf 600 root:root <<< "$client_config" || {
@@ -220,6 +252,30 @@ refresh_client_config() {
 
 valid_port() {
     [[ "$1" =~ ^[0-9]{1,5}$ ]] && (( 10#$1 >= 1 && 10#$1 <= 65535 ))
+}
+
+client_ipv4_port() {
+    local listen="${1//[[:space:]]/}" address="$2" endpoint host port fallback="" wildcard="" exact="" ambiguous=0
+    local -a endpoints
+    IFS=, read -r -a endpoints <<< "$listen"
+    for endpoint in "${endpoints[@]}"; do
+        [[ "$endpoint" == *:* ]] || { fail "监听地址格式无效"; return 1; }
+        host=${endpoint%:*}; port=${endpoint##*:}
+        valid_port "$port" || { fail "服务端端口无效"; return 1; }
+        [[ "$host" != *:* ]] || continue
+        [ "$host" != "$address" ] || exact=${exact:-$port}
+        [ "$host" != 0.0.0.0 ] || wildcard=${wildcard:-$port}
+        # NAT 部署允许私有绑定地址，但多个不同端口不能静默猜选。
+        if valid_ipv4 "$host"; then
+            if [ -z "$fallback" ]; then fallback=$port
+            elif [ "$fallback" != "$port" ]; then ambiguous=1
+            fi
+        fi
+    done
+    if [ -n "$exact" ]; then printf '%s\n' "$exact"; return 0; fi
+    if [ -n "$wildcard" ]; then printf '%s\n' "$wildcard"; return 0; fi
+    if [ -n "$fallback" ] && (( !ambiguous )); then printf '%s\n' "$fallback"; return 0; fi
+    fail "无法确定客户端 IPv4 对应的监听端口，请检查 listen 中的 IPv4 地址和端口"
 }
 
 ipv6_available() {
@@ -290,7 +346,9 @@ render_server_setting() {
     ' /etc/snell/snell-server.conf
 }
 
-apply_snell_setting() (
+apply_snell_setting() { with_snell_lock _apply_snell_setting "$@"; }
+
+_apply_snell_setting() (
     local key="$1" value="$2" label="$3" sync_client="${4:-1}" was_running=0
     local old_server old_client="" new_server new_client="" had_client=0
     local server_written=0 client_written=0 restart_attempted=0
@@ -300,6 +358,7 @@ apply_snell_setting() (
         fail "服务正在切换状态或无法确认状态，请稍后重试"
         return 1
     fi
+    secure_config_directory || { fail "设置配置目录权限失败"; return 1; }
     old_server=$(cat /etc/snell/snell-server.conf) || return 1
     new_server=$(render_server_setting "$key" "$value") || {
         fail "配置值无效或服务端缺少唯一的 [snell-server] 节"; return 1;
@@ -366,7 +425,9 @@ require_snell_config() {
     }
 }
 
-switch_snell_mode() {
+switch_snell_mode() { with_snell_lock _switch_snell_mode "$@"; }
+
+_switch_snell_mode() {
     local current_mode selection selected_mode
     require_snell_config || return 1
     current_mode=$(config_value mode) || current_mode=default
@@ -392,7 +453,9 @@ switch_snell_mode() {
     apply_snell_setting mode "$selected_mode" "模式"
 }
 
-change_snell_port() {
+change_snell_port() { with_snell_lock _change_snell_port "$@"; }
+
+_change_snell_port() {
     local listen current_port port listeners new_listen
     require_snell_config || return 1
     listen=$(config_value listen) || return 1
@@ -415,7 +478,9 @@ change_snell_port() {
     echo "请在云安全组和系统防火墙中放行 TCP 端口 ${port}。"
 }
 
-switch_snell_dns() {
+switch_snell_dns() { with_snell_lock _switch_snell_dns "$@"; }
+
+_switch_snell_dns() {
     local current selection preference
     require_snell_config || return 1
     if current=$(config_value dns-ip-preference); then :
@@ -498,13 +563,17 @@ choose_port() {
     fail "未找到可用的随机 TCP 端口"
 }
 
-service_action() {
+service_action() (
+    # OpenRC 会启动后台监督进程，不让它继承管理操作的锁。
+    if [ -n "${SNELL_LOCK_FD:-}" ]; then exec {SNELL_LOCK_FD}>&-; fi
     if [ "$(get_system_type)" = alpine ]; then
         rc-service snell "$1"
     else
+        # 修正配置后允许立即重试，避免上一次崩溃触发的启动频率限制阻碍恢复。
+        case "$1" in start|restart) systemctl reset-failed snell.service || return 1 ;; esac
         systemctl "$1" snell.service
     fi
-}
+)
 
 show_logs() {
     if [ "$(get_system_type)" = alpine ]; then
@@ -555,7 +624,7 @@ replace_snell_binary() (
 
 snell_binary_version() { timeout -k 2 "${2:-10}" "$1" -v; }
 
-restart_snell() { start_snell_checked restart; }
+restart_snell() { with_snell_lock start_snell_checked restart; }
 
 check_root() {
     if [ "$(id -u)" != "0" ]; then
@@ -594,15 +663,75 @@ check_snell_stopped() {
     fi
 }
 
+snell_service_pid() {
+    local helper
+    if [ "$(get_system_type)" = alpine ]; then
+        for helper in /usr/libexec/rc/bin/service_get_value /lib/rc/bin/service_get_value /usr/lib/rc/bin/service_get_value; do
+            if [ -x "$helper" ]; then
+                RC_SVCNAME=snell "$helper" child_pid
+                return $?
+            fi
+        done
+        return 1
+    fi
+    systemctl show snell.service --property=MainPID --value
+}
+
+snell_listener_pid() {
+    local pid executable listen endpoint host port sockets4="" sockets6="" sockets
+    local -a endpoints
+    pid=$(snell_service_pid) || return 1
+    [[ "$pid" =~ ^[1-9][0-9]*$ ]] || return 1
+    executable=$(readlink "/proc/$pid/exe") || return 1
+    case "$executable" in
+        /usr/local/bin/snell-server) ;;
+        /lib/ld-musl-*.so.1)
+            # Alpine 的 gcompat 通过 musl 加载 glibc 内核，exe 指向加载器。
+            # 仍须确认该服务进程实际映射并执行了 Snell，不能只认加载器。
+            [ "$(get_system_type)" = alpine ] &&
+                awk -v binary=/usr/local/bin/snell-server '
+                    $2 ~ /x/ && $6 == binary { found=1 }
+                    END { exit !found }
+                ' "/proc/$pid/maps" || return 1
+            ;;
+        *) return 1 ;;
+    esac
+    listen=$(config_value listen) || return 1
+    listen=${listen//[[:space:]]/}
+    [ -n "$listen" ] || return 1
+    IFS=, read -r -a endpoints <<< "$listen"
+    sockets4=$(ss -H -4 -ltnp) && sockets6=$(ss -H -6 -ltnp) || return 1
+    for endpoint in "${endpoints[@]}"; do
+        host=${endpoint%:*}; port=${endpoint##*:}
+        valid_port "$port" || return 1
+        case "$host" in
+            \[*\]) sockets=$sockets6 ;;
+            *.*) sockets=$sockets4 ;;
+            *) sockets="$sockets4"$'\n'"$sockets6" ;;
+        esac
+        # ss 分别查询地址族；同一服务进程必须拥有每个配置端口。
+        awk -v port="$((10#$port))" -v pid="$pid" '
+            $4 ~ (":" port "$") && $0 ~ ("pid=" pid "[,)]") { found=1 }
+            END { exit !found }
+        ' <<< "$sockets" || return 1
+    done
+    printf '%s\n' "$pid"
+}
+
 wait_snell_state() {
-    local desired="$1" attempt stable=0
+    local desired="$1" attempt stable=0 pid previous_pid=""
     for ((attempt=0; attempt<8; attempt++)); do
         if [ "$desired" = stopped ]; then
             check_snell_stopped && return 0
         else
-            # 连续三次检查，避免把命令成功或短暂启动当成持续运行。
+            # 同一内核进程连续三次持有监听端口；监督进程存活不算启动成功。
             sleep 1
-            if check_snell_running; then stable=$((stable+1)); else stable=0; fi
+            if check_snell_running && pid=$(snell_listener_pid); then
+                if [ "$pid" = "$previous_pid" ]; then stable=$((stable+1)); else stable=1; fi
+                previous_pid=$pid
+            else
+                stable=0; previous_pid=""
+            fi
             (( stable >= 3 )) && return 0
             continue
         fi
@@ -619,12 +748,16 @@ start_snell_checked() {
     fi
 }
 
-start_snell() {
+start_snell() { with_snell_lock _start_snell "$@"; }
+
+_start_snell() {
     start_snell_checked start || return 1
     echo -e "${GREEN}Snell 启动成功${RESET}"
 }
 
-stop_snell() {
+stop_snell() { with_snell_lock _stop_snell "$@"; }
+
+_stop_snell() {
     if ! service_action stop || ! wait_snell_state stopped; then
         fail "Snell 停止失败或无法确认已经停止，保留现有文件"
         show_logs recent >&2
@@ -633,7 +766,13 @@ stop_snell() {
     echo -e "${GREEN}Snell 停止成功${RESET}"
 }
 
-install_snell() {
+install_snell() { with_snell_lock _install_snell "$@"; }
+
+_install_snell() {
+    if [ -e /etc/snell/snell-server.conf ] || [ -e /usr/local/bin/snell-server ]; then
+        echo -e "${YELLOW}已有 Snell 配置或内核，已取消重复安装；现有配置保持不变。${RESET}"
+        return 0
+    fi
     echo -e "${GREEN}正在安装 Snell${RESET}"
 
     get_architecture >/dev/null || return 1
@@ -655,7 +794,7 @@ install_snell() {
         fi
     fi
 
-    mkdir -p /etc/snell || { fail "创建配置目录失败"; return 1; }
+    secure_config_directory || { fail "创建配置目录或设置权限失败"; return 1; }
     write_file /etc/snell/snell-server.conf 640 root:snell << EOF || return 1
 [snell-server]
 mode = default
@@ -702,7 +841,9 @@ EOF
     echo -e "${GREEN}🎉Snell 安装成功${RESET}"
 }
 
-update_snell() {
+update_snell() { with_snell_lock _update_snell "$@"; }
+
+_update_snell() {
     local was_running=0 listen new_listen
     if [ ! -f "/usr/local/bin/snell-server" ]; then
         echo -e "${YELLOW}Snell 未安装，跳过更新${RESET}"
@@ -742,7 +883,9 @@ update_snell() {
     refresh_client_config
 }
 
-uninstall_snell() {
+uninstall_snell() { with_snell_lock _uninstall_snell "$@"; }
+
+_uninstall_snell() {
     echo -e "${GREEN}正在卸载 Snell${RESET}"
     # 无论当前处于启动、重启还是停止状态，都先执行停止并核实结果。
     stop_snell || return 1
