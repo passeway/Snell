@@ -27,7 +27,7 @@ jobs:
         env:
           TEST_IMAGE: ${{ matrix.image }}
         run: |
-          docker run --rm -v "$GITHUB_WORKSPACE:/repo:ro" -v "$RUNNER_TEMP/snell-cores:/core:ro" -e SNELL_TEST_BINARY=/core/snell-server -e SING_BOX_TEST_BINARY=/core/sing-box -w /repo "$TEST_IMAGE" sh -ec '
+          docker run --rm --sysctl net.ipv6.conf.all.disable_ipv6=0 --sysctl net.ipv6.conf.default.disable_ipv6=0 -v "$GITHUB_WORKSPACE:/repo:ro" -v "$RUNNER_TEMP/snell-cores:/core:ro" -e SNELL_TEST_BINARY=/core/snell-server -e SING_BOX_TEST_BINARY=/core/sing-box -w /repo "$TEST_IMAGE" sh -ec '
             if command -v apk >/dev/null; then
               apk add --no-cache bash python3
             else
