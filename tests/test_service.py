@@ -38,6 +38,11 @@ set -x
 get_system_type
 snell_service_pid
 snell_listener_pid
+pid=$(snell_service_pid)
+if [[ "$pid" =~ ^[1-9][0-9]*$ ]]; then
+    readlink "/proc/$pid/exe"
+    awk '/snell-server/ {print}' "/proc/$pid/maps"
+fi
 ss -H -ltnp
 ls -ld /etc/snell /etc/snell/snell-server.conf
 id snell

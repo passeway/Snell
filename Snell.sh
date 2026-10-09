@@ -666,7 +666,7 @@ check_snell_stopped() {
 snell_service_pid() {
     local helper
     if [ "$(get_system_type)" = alpine ]; then
-        for helper in /lib/rc/bin/service_get_value /usr/lib/rc/bin/service_get_value; do
+        for helper in /usr/libexec/rc/bin/service_get_value /lib/rc/bin/service_get_value /usr/lib/rc/bin/service_get_value; do
             if [ -x "$helper" ]; then
                 RC_SVCNAME=snell "$helper" child_pid
                 return $?
@@ -678,11 +678,24 @@ snell_service_pid() {
 }
 
 snell_listener_pid() {
-    local pid listen endpoint host port sockets4="" sockets6="" sockets
+    local pid executable listen endpoint host port sockets4="" sockets6="" sockets
     local -a endpoints
     pid=$(snell_service_pid) || return 1
     [[ "$pid" =~ ^[1-9][0-9]*$ ]] || return 1
-    [ "$(readlink "/proc/$pid/exe")" = /usr/local/bin/snell-server ] || return 1
+    executable=$(readlink "/proc/$pid/exe") || return 1
+    case "$executable" in
+        /usr/local/bin/snell-server) ;;
+        /lib/ld-musl-*.so.1)
+            # Alpine 的 gcompat 通过 musl 加载 glibc 内核，exe 指向加载器。
+            # 仍须确认该服务进程实际映射并执行了 Snell，不能只认加载器。
+            [ "$(get_system_type)" = alpine ] &&
+                awk -v binary=/usr/local/bin/snell-server '
+                    $2 ~ /x/ && $6 == binary { found=1 }
+                    END { exit !found }
+                ' "/proc/$pid/maps" || return 1
+            ;;
+        *) return 1 ;;
+    esac
     listen=$(config_value listen) || return 1
     listen=${listen//[[:space:]]/}
     [ -n "$listen" ] || return 1

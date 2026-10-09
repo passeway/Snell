@@ -839,6 +839,23 @@ ss() {{
 real_snell_listener_pid'''
             self.run_shell(body, expected=expected)
 
+    def test_listener_health_recognizes_gcompat_only_with_mapped_snell(self):
+        self.server_config()
+        maps = self.root / 'process-maps'
+        self.code = self.code.replace('/proc/$pid/maps', str(maps))
+        for system, loader, mapped, permissions, expected in [
+                ('alpine', '/lib/ld-musl-x86_64.so.1', self.binary, 'r-xp', 0),
+                ('alpine', '/lib/ld-musl-aarch64.so.1', self.binary, 'r-xp', 0),
+                ('alpine', '/lib/ld-musl-x86_64.so.1', '/other/program', 'r-xp', 1),
+                ('alpine', '/lib/ld-musl-x86_64.so.1', self.binary, 'r--p', 1),
+                ('debian', '/lib/ld-musl-x86_64.so.1', self.binary, 'r-xp', 1)]:
+            maps.write_text(f'1000-2000 {permissions} 00000000 00:01 123 {mapped}\n')
+            self.run_shell(f'''get_system_type() {{ echo {system}; }}
+snell_service_pid() {{ echo 123; }}
+readlink() {{ echo {loader}; }}
+ss() {{ echo 'LISTEN 0 128 *:40443 *:* users:(("ld-musl",pid=123,fd=4))'; }}
+real_snell_listener_pid''', expected=expected)
+
 
 if __name__ == '__main__':
     unittest.main()
