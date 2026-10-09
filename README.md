@@ -55,7 +55,7 @@ See the [official release notes](https://kb.nssurge.com/surge-knowledge-base/rel
 - **Ready after installation**: dependencies, a random port, a 48-character random PSK and a Surge proxy entry are prepared for you.
 - **Three Linux systems**: systemd on Debian / Ubuntu and OpenRC on Alpine, with AMD64 and ARM64 support.
 - **One management menu**: installation, service controls, logs, port / mode / DNS settings and client configuration export.
-- **Verified outcomes**: binary execution and service-state checks, with the running or stopped state preserved during updates.
+- **Verified outcomes**: checks the service's actual process and listening ports, with the running or stopped state preserved during updates.
 
 > The installer currently downloads the official **v6.0.0rc2** test release. It uses `mode=default` with AES encryption and traffic shaping. Your client must support Snell v6 and use the same mode as the server.
 
@@ -80,6 +80,8 @@ bash -c 'bash <(curl -fsSL https://snell-ten.vercel.app)'
 
 **Run the script → Choose `1` → Allow the generated TCP port → Connect with Surge.**
 
+Choosing **1** again preserves an existing installation. Use **4** to update the binary or **9** to change its configuration.
+
 Allow the actual listening port in both your cloud security group and server firewall. v6 relays UDP over TCP; no additional inbound UDP port is required for that relay.
 
 When the IPv6 stack is enabled and an IPv6 address exists, the installer uses `0.0.0.0:PORT,[::]:PORT`; otherwise it listens on IPv4 only. Option **4** checks again when updating an existing installation and preserves manually bound addresses. Public IPv6 access also requires a public IPv6 address and the corresponding firewall rules. Generated client entries use the server's IPv4 address by default.
@@ -97,6 +99,8 @@ The address, port and PSK above are placeholders. Use the actual entry printed a
 
 Option **8** reads the current server port, PSK and mode while preserving the existing valid address and node name. After editing the server configuration, restart with **5**, then export with **8**.
 
+When IPv4 and IPv6 use different ports, the exported IPv4 entry uses the matching IPv4 listener. If that listener cannot be determined, the existing entry is preserved and the script reports the problem.
+
 ## Change Snell configuration
 
 Choose **9 · Change Snell configuration**:
@@ -109,6 +113,8 @@ Choose **9 · Change Snell configuration**:
 | `0. Return` | Return to the main menu |
 
 Ports must be in `1–65535`. Allow the new TCP port in your firewall and update your client after changing it. A running service is restarted and checked; a stopped service stays stopped. Failed writes or restarts trigger an attempt to restore the previous configuration without creating backup files.
+
+Only one management operation can change files or service state at a time. If another terminal is making a change, wait for it to finish and retry.
 
 ### Proxy mode
 
@@ -184,7 +190,7 @@ For bug reports, include your OS, architecture, server and client versions, and 
 
 ---
 
-**Continuously checked** · Three-system CI installs the script's actual dependencies and covers configuration changes and recovery, IPv6 detection and Alpine log suppression, plus real proxy traffic for all three protocol modes, IPv4 / IPv6 listeners, port changes and all five DNS preferences. Service manager commands are mocked; validate your actual network path on your own deployment.
+**Continuously checked** · Native AMD64 and ARM64 CI covers Debian, Ubuntu and Alpine. It installs the actual dependencies, tests all three protocol modes and five DNS preferences, and verifies IPv4 / IPv6 traffic and differing listener ports. Real systemd / OpenRC lifecycle tests also cover service-user permissions, repeat installation, configuration changes, failed-start recovery, updates and uninstall. Validate your public network path on your own deployment.
 
 <div align="center">
 

@@ -1,41 +1,35 @@
 name: Shell regression checks
 on:
   push:
+    branches: [main]
   pull_request:
 permissions:
   contents: read
 jobs:
   regression:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
         image: [debian:bookworm-slim, ubuntu:24.04, alpine:3.22, alpine:edge]
     steps:
       - uses: actions/checkout@v4
       - name: Download official cores for interoperability checks
         run: |
           source ./Snell.sh
+          server_arch=$(get_architecture)
+          client_arch=amd64
+          if [ "$server_arch" = aarch64 ]; then client_arch=arm64; fi
           mkdir -p "$RUNNER_TEMP/snell-cores"
-          timeout -k 5 180 wget --timeout=15 --tries=3 --waitretry=2 "https://dl.nssurge.com/snell/snell-server-${VERSION}-linux-amd64.zip" -O "$RUNNER_TEMP/snell-cores/snell.zip"
+          timeout -k 5 180 wget --timeout=15 --tries=3 --waitretry=2 "https://dl.nssurge.com/snell/snell-server-${VERSION}-linux-${server_arch}.zip" -O "$RUNNER_TEMP/snell-cores/snell.zip"
           unzip -o "$RUNNER_TEMP/snell-cores/snell.zip" snell-server -d "$RUNNER_TEMP/snell-cores"
           # Pin the independent test client; this does not set the installed Snell version.
-          curl -fL --retry 2 --connect-timeout 10 --max-time 180 https://github.com/SagerNet/sing-box/releases/download/v1.14.2/sing-box-1.14.2-linux-amd64.tar.gz -o "$RUNNER_TEMP/snell-cores/client.tar.gz"
-          tar -xzf "$RUNNER_TEMP/snell-cores/client.tar.gz" -C "$RUNNER_TEMP/snell-cores" --strip-components=1 sing-box-1.14.2-linux-amd64/sing-box
+          curl -fL --retry 2 --connect-timeout 10 --max-time 180 "https://github.com/SagerNet/sing-box/releases/download/v1.14.2/sing-box-1.14.2-linux-${client_arch}.tar.gz" -o "$RUNNER_TEMP/snell-cores/client.tar.gz"
+          tar -xzf "$RUNNER_TEMP/snell-cores/client.tar.gz" -C "$RUNNER_TEMP/snell-cores" --strip-components=1 "sing-box-1.14.2-linux-${client_arch}/sing-box"
           chmod 755 "$RUNNER_TEMP/snell-cores/snell-server" "$RUNNER_TEMP/snell-cores/sing-box"
-      - name: Check syntax, regression behavior and real proxy traffic
+      - name: Check regression behavior, proxy traffic and real service managers
         env:
           TEST_IMAGE: ${{ matrix.image }}
-        run: |
-          docker run --rm --sysctl net.ipv6.conf.all.disable_ipv6=0 --sysctl net.ipv6.conf.default.disable_ipv6=0 -v "$GITHUB_WORKSPACE:/repo:ro" -v "$RUNNER_TEMP/snell-cores:/core:ro" -e SNELL_TEST_BINARY=/core/snell-server -e SING_BOX_TEST_BINARY=/core/sing-box -w /repo "$TEST_IMAGE" sh -ec '
-            if command -v apk >/dev/null; then
-              apk add --no-cache bash python3
-            else
-              apt-get update
-              apt-get install -y --no-install-recommends bash python3
-            fi
-            bash -c "source ./Snell.sh; install_required_packages"
-            bash -n Snell.sh
-            bash -n Snell-docker.sh
-            PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -v
-          '
+        run: bash tests/ci/run.sh
