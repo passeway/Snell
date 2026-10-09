@@ -32,6 +32,18 @@ get_country() { echo Test; }
 '''
         result = subprocess.run(['bash', '-c', setup + command, 'service-test', str(SOURCE)],
                                 input=data, text=True, capture_output=True, timeout=45)
+        if result.returncode != expected:
+            diagnostic = subprocess.run(['bash', '-c', '''source "$1"
+set -x
+get_system_type
+snell_service_pid
+snell_listener_pid
+ss -H -ltnp
+ls -ld /etc/snell /etc/snell/snell-server.conf
+id snell
+ps -o pid,ppid,stat,args
+''', 'service-diagnostic', str(SOURCE)], capture_output=True, text=True, timeout=10)
+            print(diagnostic.stdout + diagnostic.stderr, flush=True)
         self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
         return result
 
@@ -142,6 +154,9 @@ get_country() { echo Test; }
             self.assertFalse(Path('/etc/systemd/system/snell.service').exists())
         finally:
             # The container is discarded by CI even if a check fails.
-            subprocess.run(['bash', '-c', 'source "$1"; service_action stop',
-                            'service-cleanup', str(SOURCE)],
-                           capture_output=True, timeout=20)
+            try:
+                subprocess.run(['bash', '-c', 'source "$1"; service_action stop',
+                                'service-cleanup', str(SOURCE)],
+                               capture_output=True, timeout=20)
+            except subprocess.TimeoutExpired:
+                print('Service cleanup timed out; CI will remove the disposable container.', flush=True)

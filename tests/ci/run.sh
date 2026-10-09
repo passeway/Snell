@@ -6,9 +6,10 @@ trap 'docker rm -f "$container_name" >/dev/null 2>&1 || true' EXIT
 docker build --build-arg "TEST_IMAGE=$TEST_IMAGE" -f tests/ci/Dockerfile -t snell-ci .
 
 init=(/sbin/init)
-if [[ "$TEST_IMAGE" == alpine:* ]]; then init=(sleep infinity); fi
+init_flags=()
+if [[ "$TEST_IMAGE" == alpine:* ]]; then init=(sleep infinity); init_flags=(--init); fi
 docker run -d --name "$container_name" --privileged --cgroupns=private \
-    --tmpfs /run --tmpfs /run/lock --tmpfs /tmp \
+    "${init_flags[@]}" --tmpfs /run --tmpfs /run/lock --tmpfs /tmp:exec,mode=1777 \
     --sysctl net.ipv6.conf.all.disable_ipv6=0 --sysctl net.ipv6.conf.default.disable_ipv6=0 \
     -v "$GITHUB_WORKSPACE:/repo:ro" -v "$RUNNER_TEMP/snell-cores:/core:ro" \
     -e SNELL_TEST_BINARY=/core/snell-server -e SING_BOX_TEST_BINARY=/core/sing-box \
