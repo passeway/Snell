@@ -282,7 +282,7 @@ check_snell_stopped() { :; }; chown() { :; }; change_snell_config''', 'dns-test'
                     self.assertIn('dns-ip-preference = ' + dns[1], (root / 'snell-server.conf').read_text())
                     if dns_alias_conflict:
                         self.assertNotIn('\nipv-preference', (root / 'snell-server.conf').read_text())
-                entry = proxy_fields((root / 'snell-client.conf').read_text())
+                entry = proxy_fields((root / 'snell-client.conf').read_text().splitlines()[0])
                 fields = dict(field.split('=', 1) for field in entry[3:])
                 self.assertEqual(fields['mode'], mode)
                 self.assertEqual(fields['psk'], psk)
