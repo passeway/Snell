@@ -521,11 +521,27 @@ _switch_snell_mode() {
 
 change_snell_port() { with_snell_lock _change_snell_port "$@"; }
 
+# 按地址族判断监听冲突：IPv6 地址只与 IPv6 监听冲突，IPv4 同理；
+# ss 显示为 *:端口 的双栈监听与两种地址族都冲突。
+port_in_use() {
+    local listeners="$1" endpoint="$2" family=any
+    case "${endpoint%:*}" in
+        \[*\]) family=6 ;;
+        *.*) family=4 ;;
+    esac
+    awk -v port="$((10#${endpoint##*:}))" -v family="$family" '
+        $4 ~ (":" port "$") {
+            if (family == "any" || $4 ~ /^\*:/ || (family == 6) == ($4 ~ /^\[/)) found=1
+        }
+        END { exit !found }
+    ' <<< "$listeners"
+}
+
 _change_snell_port() {
-    local listen current_port port listeners new_listen
+    local listen port listeners new_listen endpoint running=0
+    local -a endpoints
     require_snell_config || return 1
     listen=$(config_value listen) || return 1
-    current_port=${listen%%,*}; current_port=${current_port//[[:space:]]/}; current_port=${current_port##*:}
     printf '当前监听地址: %s\n' "$listen"
     read -r -p "请输入新端口（1-65535，留空返回）: " port || return 0
     [ -n "$port" ] || return 0
@@ -537,14 +553,18 @@ _change_snell_port() {
         refresh_client_config
         return $?
     fi
-    # 运行中的当前端口属于本服务；其余情况都检查 TCP 占用。
-    if [ "$port" != "$current_port" ] || ! check_snell_running; then
-        listeners=$(ss -H -ltn) || { fail "无法检查端口占用"; return 1; }
-        if awk -v port="$port" '$4 ~ (":" port "$") {found=1} END {exit !found}' <<< "$listeners"; then
+    # 逐个检查新监听地址：只有运行中服务已占用的原地址可跳过。
+    # IPv4 与 IPv6 原端口不同、改成同一端口时，新出现的地址仍须检查。
+    listeners=$(ss -H -ltn) || { fail "无法检查端口占用"; return 1; }
+    check_snell_running && running=1
+    IFS=, read -r -a endpoints <<< "$new_listen"
+    for endpoint in "${endpoints[@]}"; do
+        (( running )) && [[ ",${listen//[[:space:]]/}," == *",$endpoint,"* ]] && continue
+        if port_in_use "$listeners" "$endpoint"; then
             fail "TCP 端口 ${port} 已被占用，请更换端口"
             return 1
         fi
-    fi
+    done
     apply_snell_setting listen "$new_listen" "监听地址" || return 1
     echo "请在云安全组和系统防火墙中放行 TCP 端口 ${port}。"
 }
@@ -621,16 +641,21 @@ auto_listen_for_existing() {
 }
 
 choose_port() {
-    local port listeners attempt
-    # 包含 IPv4/IPv6 的 TCP 监听端口；监听失败仍由后续服务启动检查处理。
-    listeners=$(ss -H -ltn) || { fail "无法检查端口占用"; return 1; }
-    for ((attempt=0; attempt<100; attempt++)); do
-        port=$(shuf -i 30000-65000 -n 1) || return 1
-        if ! awk -v port="$port" '$4 ~ (":" port "$") {found=1} END {exit !found}' <<< "$listeners"; then
+    local port sockets candidates low="" high=""
+    # 包含 IPv4/IPv6 的所有 TCP 状态：TIME_WAIT 等非监听套接字同样会让监听绑定失败。
+    sockets=$(ss -H -tan) || { fail "无法检查端口占用"; return 1; }
+    # 避开内核临时端口范围，出站连接随时可能占用其中的端口；范围覆盖全部候选时不排除。
+    [ -r /proc/sys/net/ipv4/ip_local_port_range ] &&
+        read -r low high < /proc/sys/net/ipv4/ip_local_port_range
+    [[ "$low" =~ ^[0-9]+$ && "$high" =~ ^[0-9]+$ ]] || { low=1; high=0; }
+    candidates=$(seq 30000 65000 | awk -v low="$low" -v high="$high" '$1 < low || $1 > high' | shuf -n 100)
+    [ -n "$candidates" ] || candidates=$(seq 30000 65000 | shuf -n 100)
+    while read -r port; do
+        if ! awk -v port="$port" '$4 ~ (":" port "$") {found=1} END {exit !found}' <<< "$sockets"; then
             printf '%s\n' "$port"
             return 0
         fi
-    done
+    done <<< "$candidates"
     fail "未找到可用的随机 TCP 端口"
 }
 
