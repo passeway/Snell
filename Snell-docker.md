@@ -44,15 +44,21 @@ sudo systemctl status docker   # Docker 状态
 
 sudo docker compose version    # compose版本
 ```
-卸载 Snell
-```
-sudo docker stop snell
-sudo docker rm snell
-sudo docker rmi accors/snell
-sudo rm -rf /root/snell-docker
-```
-
-安装 Snell
+安装 Snell v6
 ```
 bash <(curl -fsSL https://raw.githubusercontent.com/passeway/Snell/main/Snell-docker.sh)
+```
+脚本在本地用官方内核构建 `snell-server` 镜像，以 host 网络运行，并输出 Surge 代理条目。
+重复运行会保留已有 v6 配置；旧版 v5 配置会迁移为 v6，并保留原端口和 PSK。
+
+Snell 常用指令
+```
+cat /root/snell-docker/snell-conf/snell.txt                 # 查看 Surge 代理条目
+sudo docker logs -f snell                                   # Snell 日志
+cd /root/snell-docker && sudo docker compose restart        # 修改 snell-conf/snell.conf 后重启
+```
+卸载 Snell
+```
+cd /root/snell-docker && sudo docker compose down --rmi local
+sudo rm -rf /root/snell-docker
 ```
