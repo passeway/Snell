@@ -15,7 +15,7 @@ jobs:
         runner: [ubuntu-24.04, ubuntu-24.04-arm]
         image: [debian:bookworm-slim, ubuntu:24.04, alpine:3.22, alpine:edge]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Download official cores for interoperability checks
         run: |
           source ./Snell.sh
