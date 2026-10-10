@@ -223,16 +223,28 @@ install_required_packages repair''')
             self.assertEqual(destination.read_text(), 'previous')
             self.assertEqual(list(self.root.glob('result.tmp.*')), [])
 
-    def test_choose_port_retries_occupied_ipv4_and_ipv6(self):
-        counter = self.root / 'counter'
-        result = self.run_shell(f'''
-ss() {{ printf 'LISTEN 0 128 0.0.0.0:31000 0.0.0.0:*\\nLISTEN 0 128 [::]:31001 [::]:*\\n'; }}
-shuf() {{ local n=31000; [ ! -f '{counter}' ] || read -r n < '{counter}'; echo $((n+1)) > '{counter}'; echo "$n"; }}
-choose_port
-''')
-        self.assertEqual(result.stdout.strip(), '31002')
+    def test_choose_port_skips_ephemeral_range_and_sockets_in_any_state(self):
+        port_range = self.root / 'port_range'
+        self.code = self.code.replace('/proc/sys/net/ipv4/ip_local_port_range', str(port_range))
+        # Candidates are 30000, 30001 and 65000; a listener and a TIME_WAIT socket block the first two.
+        port_range.write_text('30002\t64999\n')
+        result = self.run_shell('''
+ss() { [ "$*" = '-H -tan' ] || return 1
+    printf 'LISTEN 0 128 0.0.0.0:30000 0.0.0.0:*\\nTIME-WAIT 0 0 [::1]:30001 [::1]:40000\\n'; }
+shuf() { cat; }; choose_port''')
+        self.assertEqual(result.stdout.strip(), '65000')
+        # A peer port is not a local binding.
+        result = self.run_shell('''ss() { echo "ESTAB 0 0 127.0.0.1:40000 127.0.0.1:30000"; }
+shuf() { cat; }; choose_port''')
+        self.assertEqual(result.stdout.strip(), '30000')
+        # A range covering every candidate, or an unreadable one, falls back to the whole range.
+        for text in ['1024 65535\n', 'invalid\n']:
+            port_range.write_text(text)
+            result = self.run_shell('ss() { :; }; shuf() { cat; }; choose_port')
+            self.assertEqual(result.stdout.strip(), '30000')
+        port_range.write_text('30001 65000\n')
+        self.run_shell('ss() { echo "LISTEN 0 128 [::]:30000 [::]:*"; }; shuf() { cat; }; choose_port', expected=1)
         self.run_shell('ss() { return 1; }; choose_port', expected=1)
-        self.run_shell('ss() { echo "LISTEN 0 128 [::]:31000 [::]:*"; }; shuf() { echo 31000; }; choose_port', expected=1)
 
     def test_binary_failures_keep_installed_binary(self):
         self.binary.write_text('original')
@@ -801,13 +813,41 @@ restart_snell() {{ echo RESTARTED; }}; change_snell_port''', '01234\n')
             self.assert_mode_files_unchanged(before)
 
     def test_port_change_same_running_port_allows_dual_stack_upgrade(self):
+        # The running service's own IPv4 listener is not a conflict for the new IPv6 address.
         self.prepare_mode_switch()
         self.server.write_text(self.server.read_text().replace('[::]:40443,0.0.0.0:40443', '0.0.0.0:40443'))
-        result = self.run_shell('''check_snell_installed() { :; }; check_snell_running() { :; }
-ipv6_available() { :; }; ss() { echo UNEXPECTED_PORT_SCAN; return 1; }
+        self.run_shell('''check_snell_installed() { :; }; check_snell_running() { :; }
+ipv6_available() { :; }; ss() { echo "LISTEN 0 128 0.0.0.0:40443 0.0.0.0:*"; }
 restart_snell() { :; }; change_snell_port''', '40443\n')
         self.assertIn('0.0.0.0:40443,[::]:40443', self.server.read_text())
-        self.assertNotIn('UNEXPECTED_PORT_SCAN', result.stdout)
+        # Another program on the new IPv6 address is.
+        before = self.prepare_mode_switch()
+        self.server.write_text(self.server.read_text().replace('[::]:40443,0.0.0.0:40443', '0.0.0.0:40443'))
+        before = self.server.read_bytes(), before[1]
+        result = self.run_shell('''check_snell_installed() { :; }; check_snell_running() { :; }
+ipv6_available() { :; }; ss() { printf 'LISTEN 0 128 0.0.0.0:40443 0.0.0.0:*\\nLISTEN 0 128 [::]:40443 [::]:*\\n'; }
+restart_snell() { echo UNEXPECTED_RESTART; }; change_snell_port''', '40443\n', expected=1)
+        self.assertIn('已被占用', result.stderr)
+        self.assertNotIn('UNEXPECTED', result.stdout)
+        self.assertEqual((self.server.read_bytes(), self.client.read_bytes()), before)
+
+    def test_unifying_different_family_ports_checks_the_new_address(self):
+        for listeners, status in [
+                ('LISTEN 0 128 0.0.0.0:40443 0.0.0.0:*\\nLISTEN 0 128 [::]:40444 [::]:*', 0),
+                ('LISTEN 0 128 0.0.0.0:40443 0.0.0.0:*\\nLISTEN 0 128 [::]:40443 [::]:*', 1),
+                ('LISTEN 0 128 *:40443 *:*', 1)]:
+            with self.subTest(listeners=listeners):
+                self.prepare_mode_switch()
+                self.server.write_text(self.server.read_text().replace(
+                    '[::]:40443,0.0.0.0:40443', '0.0.0.0:40443,[::]:40444'))
+                before = self.server.read_bytes()
+                self.run_shell(f'''check_snell_installed() {{ :; }}; check_snell_running() {{ :; }}
+ipv6_available() {{ :; }}; ss() {{ printf '{listeners}\\n'; }}
+restart_snell() {{ :; }}; change_snell_port''', '40443\n', expected=status)
+                if status:
+                    self.assertEqual(self.server.read_bytes(), before)
+                else:
+                    self.assertIn('listen = 0.0.0.0:40443,[::]:40443\n', self.server.read_text())
 
     def test_same_port_preserves_server_file_and_state_and_refreshes_client(self):
         for running in (False, True):
