@@ -41,6 +41,8 @@ class SnellTests(unittest.TestCase):
         self.code += '\ngetent() { return 0; }\ngroupadd() { return 99; }; addgroup() { return 99; }; useradd() { return 99; }; adduser() { return 99; }\n'
         # No offline test may change packages on the host, including repair paths.
         self.code += '\napt-get() { return 99; }; apk() { return 99; }\n'
+        # The host's own addresses must not leak into exports; IPv6 tests provide fixtures.
+        self.code += '\nip() { return 1; }\n'
         # Keep download fixtures as shell functions; timeout itself is exercised separately.
         self.code += '\ntimeout() { [ "$1" != -k ] || shift 2; shift; "$@"; }\n'
         self.code += '\neval "$(declare -f snell_listener_pid | sed \'1s/snell_listener_pid/real_snell_listener_pid/\')"\nsnell_listener_pid() { echo 123; }\n'
@@ -560,6 +562,47 @@ replace_snell_binary() { echo UNEXPECTED_REPLACE; }; update_snell''', expected=1
         result = self.run_shell('get_public_ip() { echo 203.0.113.10; }; refresh_client_config')
         self.assertIn('203.0.113.10', result.stdout)
         self.assertNotIn('127.0.0.1', result.stdout)
+
+    def test_public_ipv6_uses_stable_global_interface_address(self):
+        addresses = (
+            '2: eth0    inet6 2001:db8::aaaa/64 scope global temporary dynamic \\\\       valid_lft 1sec\\n'
+            '2: eth0    inet6 fd00::1/64 scope global \\\\       valid_lft forever\\n'
+            '2: eth0    inet6 2001:DB8::1/64 scope global dynamic mngtmpaddr \\\\       valid_lft 1sec\\n')
+        result = self.run_shell(f"ipv6_available() {{ :; }}; ip() {{ printf '{addresses}'; }}; get_public_ipv6")
+        self.assertEqual(result.stdout.strip(), '2001:db8::1')
+        # Only ULA, temporary or no global addresses, or a disabled stack, export nothing.
+        self.run_shell("ipv6_available() { :; }; ip() { printf '2: eth0    inet6 fd00::1/64 scope global \\n'; }; "
+                       "get_public_ipv6", expected=1)
+        self.run_shell('ipv6_available() { :; }; ip() { :; }; get_public_ipv6', expected=1)
+        self.run_shell("ipv6_available() { return 1; }; ip() { echo UNEXPECTED; }; get_public_ipv6", expected=1)
+
+    def test_client_ipv6_port_follows_ipv6_listeners(self):
+        for listen, address, want in [
+                ('0.0.0.0:1000,[::]:2000', '2001:db8::1', '2000'),
+                ('[::]:2000,[2001:DB8::1]:3000', '2001:db8::1', '3000'),
+                ('[2001:db8::9]:04000', '2001:db8::1', '4000'),
+                ('0.0.0.0:1000', '2001:db8::1', None),
+                ('[2001:db8::8]:1,[2001:db8::9]:2', '2001:db8::1', None)]:
+            with self.subTest(listen=listen):
+                result = self.run_shell(f"client_ipv6_port '{listen}' '{address}'", expected=0 if want else 1)
+                self.assertEqual(result.stdout.strip(), want or '')
+
+    def test_export_adds_ipv6_entry_only_with_ipv6_address_and_listener(self):
+        self.server_config()
+        self.client.write_text('HK = snell, 203.0.113.1, 40443, psk=old\n')
+        lines = self.run_shell('get_public_ipv6() { echo 2001:db8::1; }; refresh_client_config').stdout.splitlines()
+        self.assertEqual(lines, self.client.read_text().splitlines())
+        self.assertEqual(proxy_fields(lines[1].split('=', 1)[1]),
+                         ['snell', '2001:db8::1', '40443', 'psk=ChangedSecret=123456789',
+                          'version=6', 'mode=unshaped', 'reuse=true'])
+        self.assertTrue(lines[1].startswith('HK-v6 = '))
+        self.assertIn('HK = snell, 203.0.113.1, 40443,', lines[0])
+        # No public IPv6, or an IPv4-only listener, keeps the single IPv4 entry.
+        for setup in ['get_public_ipv6() { return 1; }',
+                      "get_public_ipv6() { echo 2001:db8::1; }; sed -i 's/\\[::\\]:40443,//' " + str(self.server)]:
+            with self.subTest(setup=setup):
+                self.run_shell(setup + '; refresh_client_config')
+                self.assertEqual(len(self.client.read_text().splitlines()), 1)
 
     def test_openrc_service_discards_stdout_and_stderr(self):
         self.run_shell('write_openrc_service')
