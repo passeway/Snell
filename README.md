@@ -82,7 +82,7 @@ bash -c 'bash <(curl -fsSL https://snell-ten.vercel.app)'
 
 Choosing **1** again preserves a complete installation. If an earlier attempt failed, it completes missing installation steps while preserving the existing port, PSK and server settings. Use **4** to update the binary or **9** to change its configuration.
 
-If the binary update finishes but generating or saving the client entry fails, the script reports the unfinished step. Resolve the error and retry the export with **8**.
+Updates check required server settings before replacing the binary. Installed dependencies are reused; only missing packages are installed. If the new binary fails its startup probe, dependencies are repaired and the probe is retried once. If the binary update finishes but generating or saving the client entry fails, the script reports the unfinished step. Resolve the error and retry the export with **8**.
 
 Allow the actual listening port in both your cloud security group and server firewall. v6 relays UDP over TCP; no additional inbound UDP port is required for that relay.
 
@@ -116,7 +116,7 @@ Choose **9 · Change Snell configuration**:
 | `3. DNS` | Choose the address-family preference for server DNS results |
 | `0. Return` | Return to the main menu |
 
-Ports must be in `1–65535`. Allow the new TCP port in your firewall and update your client after changing it. A running service is restarted and checked; a stopped service stays stopped. Failed writes or restarts trigger an attempt to restore the previous configuration without creating backup files.
+Ports must be in `1–65535`. Allow the new TCP port in your firewall and update your client after changing it. Selecting the current port refreshes the client entry without restarting the service when the listening addresses are unchanged; automatic IPv6 listener changes still apply. A running service is restarted and checked after a configuration change; a stopped service stays stopped. Failed writes or restarts trigger an attempt to restore the previous configuration without creating backup files.
 
 Only one management operation can change files or service state at a time. If another terminal is making a change, wait for it to finish and retry.
 
@@ -200,7 +200,7 @@ For bug reports, include your OS, architecture, server and client versions, and 
 
 ---
 
-**Continuously checked** · Native AMD64 and ARM64 CI covers Debian, Ubuntu and Alpine. It installs the actual dependencies, tests all three protocol modes and five DNS preferences, and verifies IPv4 / IPv6 traffic and differing listener ports. Real systemd / OpenRC lifecycle tests also cover service-user permissions, repeat installation, configuration changes, failed-start recovery, updates and uninstall. Validate your public network path on your own deployment.
+**Continuously checked** · Native AMD64 and ARM64 CI covers Debian, Ubuntu and Alpine. It installs the actual dependencies, tests all three protocol modes and five DNS preferences, and verifies TCP and UDP payloads through IPv4 / IPv6 connections, including differing listener ports. Real systemd / OpenRC lifecycle tests also cover service-user permissions, repeat installation, configuration changes, failed-start recovery, update preflight checks and uninstall. Validate your public network path on your own deployment.
 
 <div align="center">
 

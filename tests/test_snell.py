@@ -39,6 +39,8 @@ class SnellTests(unittest.TestCase):
         self.code = self.code.replace('/run/snell-manager.lock', str(self.root / 'manager.lock'))
         self.code += '\nchown() { printf "%s\\n" "$*" >> "' + str(self.root / 'owners') + '"; }\n'
         self.code += '\ngetent() { return 0; }\ngroupadd() { return 99; }; addgroup() { return 99; }; useradd() { return 99; }; adduser() { return 99; }\n'
+        # No offline test may change packages on the host, including repair paths.
+        self.code += '\napt-get() { return 99; }; apk() { return 99; }\n'
         # Keep download fixtures as shell functions; timeout itself is exercised separately.
         self.code += '\ntimeout() { [ "$1" != -k ] || shift 2; shift; "$@"; }\n'
         self.code += '\neval "$(declare -f snell_listener_pid | sed \'1s/snell_listener_pid/real_snell_listener_pid/\')"\nsnell_listener_pid() { echo 123; }\n'
@@ -75,6 +77,87 @@ class SnellTests(unittest.TestCase):
                         '<html>error</html>', '1.2.3.4,psk=x']:
             self.run_shell('valid_ipv4 "$candidate"', expected=1) if address == '' else self.run_shell(
                 'candidate=' + repr(address) + '; valid_ipv4 "$candidate"', expected=1)
+
+    def test_installed_detection_uses_managed_executable_without_path_entry(self):
+        self.server_config()
+        self.binary.write_text('#!/bin/sh\necho snell-server v6.0.0\n')
+        self.binary.chmod(0o755)
+        result = self.run_shell('''PATH=/usr/bin:/bin
+check_snell_installed && require_snell_config || exit 1
+check_snell_running() { return 1; }; show_menu''', '0\n')
+        self.assertIn('已安装', result.stdout)
+        self.assertIn('3. 启动 Snell 服务', result.stdout)
+        self.assertIn('v6.0.0', result.stdout)
+
+    def test_unrelated_path_binary_and_nonexecutable_do_not_count_as_installed(self):
+        unrelated = self.root / 'other-bin'
+        unrelated.mkdir()
+        other = unrelated / 'snell-server'
+        other.write_text('#!/bin/sh\nexit 0\n')
+        other.chmod(0o755)
+        for state in ('missing', 'not-executable', 'directory'):
+            with self.subTest(state=state):
+                if state == 'not-executable':
+                    self.binary.write_text('incomplete'); self.binary.chmod(0o644)
+                elif state == 'directory':
+                    self.binary.unlink(); self.binary.mkdir()
+                self.run_shell(f'PATH="{unrelated}:/usr/bin:/bin"; check_snell_installed', expected=1)
+
+    def test_complete_dependencies_skip_package_mutations(self):
+        for system in ('debian', 'ubuntu', 'alpine'):
+            with self.subTest(system=system):
+                result = self.run_shell(f'''get_system_type() {{ echo {system}; }}
+dpkg-query() {{ echo 'install ok installed'; }}
+apt-get() {{ echo UNEXPECTED_NETWORK; return 1; }}
+apk() {{ [ "$1 $2" = 'info -e' ] || {{ echo UNEXPECTED_NETWORK; return 1; }}; }}
+install_required_packages''')
+                self.assertIn('必要软件包已齐全', result.stdout)
+                self.assertNotIn('UNEXPECTED_NETWORK', result.stdout)
+
+    def test_missing_dependencies_only_install_missing_packages(self):
+        for system in ('debian', 'ubuntu', 'alpine'):
+            with self.subTest(system=system):
+                result = self.run_shell(f'''get_system_type() {{ echo {system}; }}
+dpkg-query() {{ case "${{@: -1}}" in curl) return 1 ;; unzip) echo 'install ok unpacked' ;; *) echo 'hold ok installed' ;; esac; }}
+apt-get() {{ printf 'APT:%s\\n' "$*"; }}
+apk() {{ if [ "$1" = info ]; then [ "$3" != curl ] && [ "$3" != unzip ]; else printf 'APK:%s\\n' "$*"; fi; }}
+install_required_packages''')
+                lines = [line for line in result.stdout.splitlines() if line.startswith(('APT:', 'APK:'))]
+                if system == 'alpine':
+                    self.assertEqual(lines, ['APK:add --no-cache unzip curl'])
+                else:
+                    self.assertEqual(lines, ['APT:-o DPkg::Lock::Timeout=120 update',
+                                             'APT:-o DPkg::Lock::Timeout=120 install -y unzip curl'])
+
+    def test_dependency_install_failure_stops_update_before_replacing_binary(self):
+        self.binary.write_text('original'); self.server_config()
+        for system in ('debian', 'ubuntu', 'alpine'):
+            for failure in ('refresh', 'install'):
+                with self.subTest(system=system, failure=failure):
+                    result = self.run_shell(f'''get_system_type() {{ echo {system}; }}
+check_snell_running() {{ :; }}; ipv6_available() {{ :; }}
+dpkg-query() {{ return 1; }}
+apt-get() {{ printf 'APT:%s\\n' "$*"; [ '{failure}' != refresh ] && [[ "$*" != *'install -y'* ]]; }}
+apk() {{ [ "$1" != info ] && echo APK_INSTALL; return 1; }}
+secure_config_files() {{ echo UNEXPECTED_PERMISSIONS; }}
+replace_snell_binary() {{ echo UNEXPECTED_REPLACE; }}; update_snell''', expected=1)
+                    self.assertNotIn('UNEXPECTED', result.stdout)
+                    self.assertEqual(self.binary.read_text(), 'original')
+                    if system != 'alpine' and failure == 'refresh':
+                        self.assertNotIn('install -y', result.stdout)
+
+    def test_dependency_repair_reinstalls_and_upgrades_requested_packages(self):
+        for system in ('debian', 'ubuntu', 'alpine'):
+            result = self.run_shell(f'''get_system_type() {{ echo {system}; }}
+dpkg-query() {{ echo 'install ok installed'; }}
+apt-get() {{ printf 'APT:%s\\n' "$*"; }}
+apk() {{ printf 'APK:%s\\n' "$*"; }}
+install_required_packages repair''')
+            self.assertIn('fix --no-cache --reinstall --upgrade' if system == 'alpine'
+                          else 'install -y --reinstall', result.stdout)
+            self.assertIn('coreutils', result.stdout)
+            if system == 'alpine':
+                self.assertIn('gcompat libstdc++', result.stdout)
 
     def test_ip_fallback_and_manual_input(self):
         result = self.run_shell('''fetch_text() {
@@ -169,11 +252,83 @@ choose_port
 
     def test_failed_restart_not_reported_as_update_success(self):
         self.binary.write_text('original')
+        self.server_config()
         result = self.run_shell('''check_snell_running() { return 0; }
+ipv6_available() { :; }
 install_required_packages() { :; }; secure_config_files() { :; }
-replace_snell_binary() { :; }; restart_snell() { return 1; }
+replace_snell_binary() { echo REPLACED; }; restart_snell() { echo RESTART_REACHED; return 1; }
 update_snell''', expected=1)
+        self.assertIn('REPLACED', result.stdout)
+        self.assertEqual(result.stdout.count('RESTART_REACHED'), 1)
+        self.assertIn('新程序已替换，但重启失败', result.stdout)
         self.assertNotIn('更新成功', result.stdout)
+
+    def test_binary_probe_repairs_dependencies_once_before_replacement(self):
+        for outcome in ('recovered', 'still-broken', 'repair-failed'):
+            with self.subTest(outcome=outcome):
+                self.binary.write_text('original')
+                result = self.run_shell(f'''wget() {{ :; }}
+unzip() {{ printf '#!/bin/sh\\nexit 0\\n' > "$5/snell-server"; }}
+probes=0
+snell_binary_version() {{ probes=$((probes+1)); echo PROBE; [ "$probes" -gt 1 ] && [ '{outcome}' = recovered ]; }}
+install_required_packages() {{ [ "$1" = repair ] || return 1; echo REPAIR; [ '{outcome}' != repair-failed ]; }}
+replace_snell_binary''', expected=0 if outcome == 'recovered' else 1)
+                self.assertEqual(result.stdout.count('REPAIR'), 1)
+                self.assertEqual(result.stdout.count('PROBE'), 1 if outcome == 'repair-failed' else 2)
+                if outcome == 'recovered':
+                    self.assertTrue(self.binary.read_text().startswith('#!/bin/sh'))
+                else:
+                    self.assertEqual(self.binary.read_text(), 'original')
+                self.assertFalse(list(self.binary.parent.glob('.snell-install.*')))
+
+    def test_invalid_update_config_fails_before_any_changes(self):
+        valid = '[snell-server]\nlisten = 0.0.0.0:40443\npsk = ValidSecret123456\nmode = default\n'
+        cases = {
+            'missing-file': None,
+            'missing-listen': valid.replace('listen = 0.0.0.0:40443\n', ''),
+            'malformed-ini': valid + 'invalid line\n',
+            'missing-psk': valid.replace('psk = ValidSecret123456\n', ''),
+            'short-psk': valid.replace('ValidSecret123456', 'short'),
+            'invalid-mode': valid.replace('mode = default', 'mode = wrong'),
+            'invalid-dns': valid + 'dns-ip-preference = wrong\n',
+            'ambiguous-edit-section': valid + '[snell-server]\n',
+        }
+        for listener in ('0.0.0.0:0', '[::]:65536', ':40443', '0.0.0.0', '::1:40443',
+                         '0.0.0.0:40443,', ',0.0.0.0:40443', '0.0.0.0:40443,,[::]:40443'):
+            cases[listener] = valid.replace('0.0.0.0:40443', listener)
+        self.binary.write_text('original')
+        self.client.write_text('existing client')
+        for name, config in cases.items():
+            with self.subTest(config=name):
+                if config is None:
+                    self.server.unlink(missing_ok=True)
+                else:
+                    self.server.write_text(config)
+                result = self.run_shell('''check_snell_running() { :; }; ipv6_available() { :; }
+install_required_packages() { echo UNEXPECTED_DEPENDENCIES; }
+secure_config_files() { echo UNEXPECTED_PERMISSIONS; }
+replace_snell_binary() { echo UNEXPECTED_REPLACE; }
+write_openrc_service() { echo UNEXPECTED_SERVICE; }
+restart_snell() { echo UNEXPECTED_RESTART; }
+refresh_client_config() { echo UNEXPECTED_CLIENT; }; update_snell''', expected=1)
+                self.assertNotIn('UNEXPECTED', result.stdout)
+                self.assertEqual(self.binary.read_text(), 'original')
+                self.assertEqual(self.client.read_text(), 'existing client')
+                self.assertEqual(self.server.read_text() if self.server.exists() else None, config)
+
+    def test_update_preflight_preserves_custom_and_ipv6_only_listeners(self):
+        self.binary.write_text('original')
+        for listen in ('[::1]:40443', '[2001:db8::1]:40443',
+                       '192.0.2.1:40443,[2001:db8::1]:40444'):
+            self.server.write_text(f'[snell-server]\nlisten = {listen}\npsk = ExampleKey #literal\n')
+            before = self.server.read_bytes()
+            result = self.run_shell('''check_snell_running() { return 1; }; check_snell_stopped() { :; }
+install_required_packages() { :; }; replace_snell_binary() { echo REPLACED; }
+restart_snell() { echo UNEXPECTED_RESTART; }
+refresh_client_config() { :; }; update_snell''')
+            self.assertIn('REPLACED', result.stdout)
+            self.assertNotIn('UNEXPECTED', result.stdout)
+            self.assertEqual(self.server.read_bytes(), before)
 
     def test_install_file_failure_stops_before_start(self):
         for failed_name in ['snell-server.conf', 'snell.service', 'snell']:
@@ -653,6 +808,37 @@ ipv6_available() { :; }; ss() { echo UNEXPECTED_PORT_SCAN; return 1; }
 restart_snell() { :; }; change_snell_port''', '40443\n')
         self.assertIn('0.0.0.0:40443,[::]:40443', self.server.read_text())
         self.assertNotIn('UNEXPECTED_PORT_SCAN', result.stdout)
+
+    def test_same_port_preserves_server_file_and_state_and_refreshes_client(self):
+        for running in (False, True):
+            for listen, ipv6 in [('0.0.0.0:40443', False),
+                                  ('0.0.0.0:40443, [::]:40443', True),
+                                  ('[::]:40443,0.0.0.0:40443', True),
+                                  ('192.0.2.1:40443,[2001:db8::1]:40443', True)]:
+                with self.subTest(running=running, listen=listen):
+                    self.prepare_mode_switch()
+                    self.server.write_text(self.server.read_text().replace('[::]:40443,0.0.0.0:40443', listen))
+                    before = self.server.read_bytes(), self.server.stat().st_mtime_ns
+                    result = self.run_shell(f'''check_snell_installed() {{ :; }}
+check_snell_running() {{ return {0 if running else 1}; }}; check_snell_stopped() {{ :; }}
+ipv6_available() {{ return {0 if ipv6 else 1}; }}
+ss() {{ echo UNEXPECTED_SCAN >&2; return 1; }}
+restart_snell() {{ echo UNEXPECTED_RESTART; return 1; }}
+apply_snell_setting() {{ echo UNEXPECTED_WRITE; return 1; }}; change_snell_port''', '40443\n')
+                    self.assertIn('无需更改', result.stdout)
+                    self.assertNotIn('UNEXPECTED', result.stdout + result.stderr)
+                    self.assertEqual((self.server.read_bytes(), self.server.stat().st_mtime_ns), before)
+                    self.assertIn('psk=ChangedSecret=123456789', self.client.read_text())
+
+    def test_same_first_port_still_updates_different_secondary_port(self):
+        self.prepare_mode_switch()
+        self.server.write_text(self.server.read_text().replace('[::]:40443', '[::]:40444'))
+        result = self.run_shell('''check_snell_installed() { :; }; check_snell_running() { :; }
+ipv6_available() { :; }; ss() { :; }
+restart_snell() { echo RESTARTED; }; change_snell_port''', '40444\n')
+        self.assertIn('[::]:40444,0.0.0.0:40444', self.server.read_text())
+        self.assertIn('RESTARTED', result.stdout)
+        self.assertIn(', 40444,', self.client.read_text())
 
     def test_dns_modes_preserve_client_and_custom_dns_servers(self):
         modes = ['default', 'prefer-ipv4', 'prefer-ipv6', 'ipv4-only', 'ipv6-only']

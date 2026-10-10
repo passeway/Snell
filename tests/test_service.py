@@ -17,6 +17,20 @@ from test_snell import SOURCE
 @unittest.skipUnless(os.environ.get('SNELL_SERVICE_TESTS') == '1',
                      'requires a disposable container with a real service manager')
 class ServiceTests(unittest.TestCase):
+    def test_installed_dependencies_need_no_network_or_package_mutations(self):
+        # Use the real package databases populated during image build. Queries
+        # are allowed, while a second install/update would fail this test.
+        result = self.shell('''source "$1"
+apt-get() { echo UNEXPECTED_APT >&2; return 99; }
+apk() {
+    if [ "$1 $2" = 'info -e' ]; then command apk "$@"
+    else echo UNEXPECTED_APK >&2; return 99
+    fi
+}
+install_required_packages''')
+        self.assertIn('必要软件包已齐全', result.stdout)
+        self.assertNotIn('UNEXPECTED', result.stdout + result.stderr)
+
     def shell(self, command, data='', expected=0):
         # Dependencies were installed using install_required_packages when building
         # the CI image. Only network downloads/address discovery use local fixtures.
@@ -141,6 +155,32 @@ umask 077; install_snell''', expected=1)
             repeated = self.shell('install_snell')
             self.assertIn('已取消重复安装', repeated.stdout)
             self.assertEqual((self.server.read_bytes(), self.client.read_bytes()), before)
+
+            # PATH must not hide the managed installation, and selecting the
+            # current port must leave the actual service process untouched.
+            pid = self.shell('snell_listener_pid').stdout.strip()
+            self.shell('PATH=/usr/sbin:/usr/bin:/sbin:/bin; check_snell_installed && require_snell_config')
+            unchanged = self.shell('change_snell_port', self.client.read_text().split(',')[2].strip() + '\n')
+            self.assertIn('无需更改', unchanged.stdout)
+            self.assertEqual(self.shell('snell_listener_pid').stdout.strip(), pid)
+            self.assertEqual((self.server.read_bytes(), self.client.read_bytes()), before)
+
+            # A bad on-disk config must be rejected before replacing the binary,
+            # even while the healthy service continues using its loaded config.
+            binary = Path('/usr/local/bin/snell-server')
+            binary_before = binary.stat().st_ino, binary.stat().st_mtime_ns
+            try:
+                self.server.write_text('[snell-server]\npsk = ValidSecret123456\n')
+                invalid = self.server.read_bytes()
+                rejected = self.shell('update_snell', expected=1)
+                self.assertIn('已取消更新', rejected.stderr)
+                self.assertEqual(self.server.read_bytes(), invalid)
+                self.assertEqual((binary.stat().st_ino, binary.stat().st_mtime_ns), binary_before)
+                self.assertEqual(self.shell('snell_service_pid').stdout.strip(), pid)
+                self.assert_traffic()
+            finally:
+                self.server.write_bytes(before[0])
+            self.shell('snell_listener_pid')
 
             self.shell('switch_snell_mode', '2\n')
             self.shell('change_snell_port', str(free_port()) + '\n')
