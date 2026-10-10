@@ -106,7 +106,24 @@ ps -o pid,ppid,stat,args
         self.client = Path('/etc/snell/snell-client.conf')
         self.assertFalse(self.server.exists(), 'service test must start in a clean container')
         try:
+            # Retry failures after downloading the core, after creating the
+            # server config, and after writing the service but before enabling it.
+            self.shell('choose_port() { return 1; }; install_snell', expected=1)
+            self.assertTrue(Path('/usr/local/bin/snell-server').exists())
+            self.assertFalse(self.server.exists())
+            self.shell('uninstall_snell')
+            self.assertFalse(Path('/usr/local/bin/snell-server').exists())
+            self.shell('choose_port() { return 1; }; install_snell', expected=1)
+            self.shell('''eval "$(declare -f write_file | sed '1s/write_file/original_write_file/')"
+write_file() {
+    case "$1" in /etc/init.d/snell|/etc/systemd/system/snell.service) return 1 ;; esac
+    original_write_file "$@"
+}
+umask 077; install_snell''', expected=1)
+            incomplete_config = self.server.read_bytes()
+            self.shell('register_snell_service() { return 1; }; install_snell', expected=1)
             self.shell('umask 077; install_snell')
+            self.assertEqual(self.server.read_bytes(), incomplete_config)
             self.assertEqual(self.server.parent.stat().st_mode & 0o777, 0o750)
             self.assertEqual(self.server.stat().st_mode & 0o777, 0o640)
             self.assertEqual(self.client.stat().st_mode & 0o777, 0o600)
@@ -117,6 +134,7 @@ ps -o pid,ppid,stat,args
                             if line.startswith('Uid:'))
             self.assertEqual(int(uid_line.split()[1]), identity.pw_uid)
             self.assertNotEqual(identity.pw_uid, 0)
+            self.shell('snell_process_exists')
             self.assert_traffic()
 
             before = self.server.read_bytes(), self.client.read_bytes()

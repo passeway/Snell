@@ -80,7 +80,7 @@ bash -c 'bash <(curl -fsSL https://snell-ten.vercel.app)'
 
 **Run the script → Choose `1` → Allow the generated TCP port → Connect with Surge.**
 
-Choosing **1** again preserves an existing installation. Use **4** to update the binary or **9** to change its configuration.
+Choosing **1** again preserves a complete installation. If an earlier attempt failed, it completes missing installation steps while preserving the existing port, PSK and server settings. Use **4** to update the binary or **9** to change its configuration.
 
 Allow the actual listening port in both your cloud security group and server firewall. v6 relays UDP over TCP; no additional inbound UDP port is required for that relay.
 
@@ -145,9 +145,13 @@ Choose **9 → 3**:
 
 This changes the address-family preference when the server connects to a hostname. Existing DNS servers are preserved; system DNS is used when none is configured. IPv6-only results require working IPv6 egress. DNS preference is independent of inbound listeners, and changing it does not require a new client entry.
 
+When both `dns-ip-preference` and its alias `ipv-preference` exist, the menu reads the last value, matching the core. Selecting a mode normalizes these fields to one `dns-ip-preference` setting.
+
 ## Service management
 
 Run the installation command again to open the menu.
+
+If the service manager reports running but the actual core process or listeners are unavailable, the menu shows an abnormal state. The stop option remains available for the managed service.
 
 | Option | Action |
 | :---: | :--- |
