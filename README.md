@@ -82,6 +82,8 @@ bash -c 'bash <(curl -fsSL https://snell-ten.vercel.app)'
 
 Choosing **1** again preserves a complete installation. If an earlier attempt failed, it completes missing installation steps while preserving the existing port, PSK and server settings. Use **4** to update the binary or **9** to change its configuration.
 
+If the binary update finishes but generating or saving the client entry fails, the script reports the unfinished step. Resolve the error and retry the export with **8**.
+
 Allow the actual listening port in both your cloud security group and server firewall. v6 relays UDP over TCP; no additional inbound UDP port is required for that relay.
 
 When the IPv6 stack is enabled and an IPv6 address exists, the installer uses `0.0.0.0:PORT,[::]:PORT`; otherwise it listens on IPv4 only. Option **4** checks again when updating an existing installation and preserves manually bound addresses. Public IPv6 access also requires a public IPv6 address and the corresponding firewall rules. Generated client entries use the server's IPv4 address by default.
@@ -98,6 +100,8 @@ My-Snell = snell, YOUR_SERVER_IP, YOUR_PORT, psk=YOUR_PSK, version=6, mode=defau
 The address, port and PSK above are placeholders. Use the actual entry printed after installation.
 
 Option **8** reads the current server port, PSK and mode while preserving the existing valid address and node name. After editing the server configuration, restart with **5**, then export with **8**.
+
+If a manually set PSK contains spaces, commas, quotes or other special characters, copy the complete exported entry, including its quotes and escapes.
 
 When IPv4 and IPv6 use different ports, the exported IPv4 entry uses the matching IPv4 listener. If that listener cannot be determined, the existing entry is preserved and the script reports the problem.
 
@@ -152,6 +156,8 @@ When both `dns-ip-preference` and its alias `ipv-preference` exist, the menu rea
 Run the installation command again to open the menu.
 
 If the service manager reports running but the actual core process or listeners are unavailable, the menu shows an abnormal state. The stop option remains available for the managed service.
+
+Option **2** also removes installation residues when the core file is missing. If a foreground Snell diagnostic process is still running, uninstall preserves the files and asks you to end that process first.
 
 | Option | Action |
 | :---: | :--- |

@@ -170,7 +170,34 @@ umask 077; install_snell''', expected=1)
             self.assertEqual(self.server.read_bytes(), before[0])
             self.shell('start_snell')
             self.assert_traffic()
-            self.shell('uninstall_snell')
+
+            # The documented foreground diagnostic process is outside the
+            # service manager. Uninstall must retain files while it is alive.
+            self.shell('stop_snell')
+            diagnostic = subprocess.Popen(['/usr/local/bin/snell-server', '-l', 'info', '-c', str(self.server)],
+                                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            try:
+                wait_port(int(self.client.read_text().split(',')[2]), diagnostic)
+                preserved = self.server.read_bytes(), self.client.read_bytes()
+                rejected = self.shell('uninstall_snell', expected=1)
+                self.assertIn('进程仍在运行', rejected.stderr)
+                self.assertNotIn('卸载成功', rejected.stdout)
+                self.assertIsNone(diagnostic.poll())
+                self.assertTrue(Path('/usr/local/bin/snell-server').exists())
+                self.assertEqual((self.server.read_bytes(), self.client.read_bytes()), preserved)
+                self.shell('snell_service_file_exists')
+            finally:
+                diagnostic.terminate()
+                try:
+                    diagnostic.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    diagnostic.kill(); diagnostic.wait()
+
+            # A missing core must not prevent entry to residual cleanup via
+            # the actual menu. Keep both the real unit and manager here.
+            Path('/usr/local/bin/snell-server').unlink()
+            uninstalled = self.shell('clear() { :; }; main', '2\n\n0\n')
+            self.assertIn('Snell 卸载成功', uninstalled.stdout)
             self.assertFalse(self.server.parent.exists())
             self.assertFalse(Path('/usr/local/bin/snell-server').exists())
             self.assertFalse(Path('/etc/init.d/snell').exists())

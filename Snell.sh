@@ -179,31 +179,80 @@ get_country() {
     fi
 }
 
-config_value() {
-    awk -v key="$1" -v alias="${3:-}" '
-        /^[[:space:]]*\[/ {
-            section=$0
-            sub(/[[:space:]]*[#;].*$/, "", section)
-            gsub(/[[:space:]]/, "", section)
-            active=(section == "[snell-server]")
-            next
+# 读取和修改共用内核的 INI 规则：行内分号注释、字面量 #、冒号分隔符，
+# 以及属于上一字段的缩进续行。续行的值覆盖上一值，不与上一行拼接。
+parse_snell_config() {
+    SNELL_CONFIG_REPLACEMENT="${5:-}" LC_ALL=C awk \
+        -v operation="$1" -v key="$2" -v alias="${4:-}" '
+        function append_setting() {
+            if (operation == "write" && active)
+                print key " = " ENVIRON["SNELL_CONFIG_REPLACEMENT"]
         }
-        active && /^[[:space:]]*[^#;][^=]*=/ {
-            name=$0; sub(/=.*/, "", name)
-            gsub(/^[[:space:]]+|[[:space:]]+$/, "", name)
-            if (name == key || (alias != "" && name == alias)) {
-                value=$0; sub(/^[^=]*=/, "", value)
-                sub(/[[:space:]]+[#;].*$/, "", value)
-                gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
-                found=1
+        {
+            original=$0; line=$0
+            if (NR == 1) sub(/^\357\273\277/, "", line)
+            sub(/[[:space:]]+$/, "", line)
+            indented=(line ~ /^[[:space:]]/)
+            sub(/^[[:space:]]+/, "", line)
+            if (line == "" || line ~ /^[#;]/) {
+                if (operation == "write") print original
+                next
             }
+            if (previous != "" && indented) {
+                # 当前内核的续行保留行内分号，不按普通赋值行处理。
+                name=previous; value=line
+            } else if (substr(line, 1, 1) == "[") {
+                header=line; sub(/[[:space:]];.*$/, "", header)
+                if (!match(header, /\]/)) { invalid=1; next }
+                append_setting()
+                active=(substr(header, 2, RSTART-2) == "snell-server")
+                previous=""
+                if (active) sections++
+                if (operation == "write") print original
+                next
+            } else {
+                assignment=line; sub(/[[:space:]];.*$/, "", assignment)
+                if (!match(assignment, /[=:]/)) { invalid=1; next }
+                name=substr(assignment, 1, RSTART-1)
+                sub(/[[:space:]]+$/, "", name)
+                if (name == "") { invalid=1; next }
+                value=substr(assignment, RSTART+1)
+                gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
+                previous=name
+            }
+            matched=(active && (name == key || (alias != "" && name == alias)))
+            if (matched) { result=value; found=1 }
+            if (operation == "write" && !matched) print original
         }
-        END { if (found) print value; else exit 1 }
-    ' "${2:-/etc/snell/snell-server.conf}"
+        END {
+            if (invalid) exit 2
+            if (operation == "write") {
+                if (sections != 1) exit 2
+                # 放在节末，避免改变原本首个缩进字段的归属。
+                append_setting()
+            } else if (found) print result
+            else exit 1
+        }
+    ' "$3"
+}
+
+config_value() {
+    parse_snell_config read "$1" "${2:-/etc/snell/snell-server.conf}" "${3:-}"
+}
+
+surge_value() {
+    local value="$1"
+    if [[ "$value" =~ ^[a-zA-Z0-9_+=./:@%-]+$ ]]; then
+        printf '%s' "$value"
+    else
+        value=${value//\\/\\\\}
+        value=${value//\"/\\\"}
+        printf '"%s"' "$value"
+    fi
 }
 
 render_client_config() {
-    local listen port psk mode server_config endpoint address="" label=""
+    local LC_ALL=C listen port psk mode server_config endpoint address="" label=""
     local -a endpoints
     [ -f /etc/snell/snell-server.conf ] || { fail "服务端配置不存在"; return 1; }
     if [ "$#" -gt 0 ]; then server_config="$1"; else
@@ -213,7 +262,7 @@ render_client_config() {
         psk=$(config_value psk /dev/stdin <<< "$server_config") || {
         fail "服务端配置缺少 listen 或 psk"; return 1;
     }
-    [ -n "$psk" ] || { fail "服务端 PSK 无效"; return 1; }
+    (( ${#psk} >= 12 && ${#psk} <= 255 )) || { fail "服务端 PSK 长度必须为 12-255 字节"; return 1; }
     IFS=, read -r -a endpoints <<< "${listen//[[:space:]]/}"
     for endpoint in "${endpoints[@]}"; do
         valid_port "${endpoint##*:}" || { fail "服务端端口无效"; return 1; }
@@ -236,7 +285,7 @@ render_client_config() {
         label=$(get_country "$address")
     fi
     printf '%s = snell, %s, %s, psk=%s, version=6, mode=%s, reuse=true\n' \
-        "$label" "$address" "$port" "$psk" "$mode"
+        "$label" "$address" "$port" "$(surge_value "$psk")" "$mode"
 }
 
 refresh_client_config() { with_snell_lock _refresh_client_config "$@"; }
@@ -317,33 +366,16 @@ listen_with_port() {
 }
 
 render_server_setting() {
-    local key="$1" value="$2"
+    local key="$1" value="$2" alias=""
     case "$key:$value" in
         mode:default|mode:unshaped|mode:unsafe-raw) ;;
         dns-ip-preference:default|dns-ip-preference:prefer-ipv4|dns-ip-preference:prefer-ipv6|dns-ip-preference:ipv4-only|dns-ip-preference:ipv6-only) ;;
         listen:*) [[ -n "$value" && "$value" != *$'\n'* && "$value" != *$'\r'* ]] || return 1 ;;
         *) fail "Snell 配置值无效"; return 1 ;;
     esac
-    # 缺失时补上，重复项合并，只修改唯一的 snell-server 节。
-    awk -v key="$key" -v value="$value" '
-        /^[[:space:]]*\[/ {
-            section=$0
-            sub(/[[:space:]]*[#;].*$/, "", section)
-            gsub(/[[:space:]]/, "", section)
-            active=(section == "[snell-server]")
-            print
-            if (active) { sections++; print key " = " value }
-            next
-        }
-        active && /^[[:space:]]*[^#;][^=]*=/ {
-            name=$0; sub(/=.*/, "", name)
-            gsub(/^[[:space:]]+|[[:space:]]+$/, "", name)
-            if (name == key) next
-            if (key == "dns-ip-preference" && name == "ipv-preference") next
-        }
-        { print }
-        END { if (sections != 1) exit 1 }
-    ' /etc/snell/snell-server.conf
+    # 缺失时补上，重复项及其续行一起合并，只修改唯一的 snell-server 节。
+    [ "$key" != dns-ip-preference ] || alias=ipv-preference
+    parse_snell_config write "$key" /etc/snell/snell-server.conf "$alias" "$value"
 }
 
 apply_snell_setting() { with_snell_lock _apply_snell_setting "$@"; }
@@ -951,10 +983,13 @@ _update_snell() {
         echo -e "${GREEN}服务保持停止状态，可通过菜单 3 启动${RESET}"
     fi
     remove_snell_log_files || { fail "清理 Snell 旧日志文件失败"; return 1; }
-    echo -e "${GREEN}🎉Snell 更新成功${RESET}"
     if (( was_running )) && [ "$(get_system_type)" != alpine ]; then show_logs recent; fi
     echo -e "${GREEN}Snell 示例配置，项目地址: https://github.com/passeway/Snell${RESET}"
-    refresh_client_config
+    refresh_client_config || {
+        fail "内核已更新，但客户端配置生成或写入失败；请处理上述错误后通过菜单 8 重试"
+        return 1
+    }
+    echo -e "${GREEN}🎉Snell 更新成功${RESET}"
 }
 
 uninstall_snell() { with_snell_lock _uninstall_snell "$@"; }
@@ -966,8 +1001,10 @@ _uninstall_snell() {
     if (( has_service )) || check_snell_running; then
         # 无论当前处于启动、重启还是停止状态，都先执行停止并核实结果。
         stop_snell || return 1
-    elif snell_process_exists; then
-        fail "服务文件缺失但 Snell 进程仍在运行，保留现有文件；请先停止该进程"
+    fi
+    # 服务已停不代表前台排错进程也已结束，删除任何文件前再次检查。
+    if snell_process_exists; then
+        fail "Snell 进程仍在运行，保留现有文件；请先结束前台排错或其他 Snell 进程再卸载"
         return 1
     fi
     if [ "$(get_system_type)" = alpine ]; then
@@ -1062,11 +1099,7 @@ main() {
                 install_snell
                 ;;
             2)
-                if [ $snell_installed -eq 0 ]; then
-                    uninstall_snell
-                else
-                    echo -e "${RED}Snell 尚未安装${RESET}"
-                fi
+                uninstall_snell
                 ;;
             3)
                 if [ $snell_installed -eq 0 ]; then
