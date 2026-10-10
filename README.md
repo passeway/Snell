@@ -86,7 +86,7 @@ Updates check required server settings before replacing the binary. Installed de
 
 Allow the actual listening port in both your cloud security group and server firewall. v6 relays UDP over TCP; no additional inbound UDP port is required for that relay.
 
-When the IPv6 stack is enabled and an IPv6 address exists, the installer uses `0.0.0.0:PORT,[::]:PORT`; otherwise it listens on IPv4 only. Option **4** checks again when updating an existing installation and preserves manually bound addresses. Public IPv6 access also requires a public IPv6 address and the corresponding firewall rules. Generated client entries use the server's IPv4 address by default.
+When the IPv6 stack is enabled and an IPv6 address exists, the installer uses `0.0.0.0:PORT,[::]:PORT`; otherwise it listens on IPv4 only. Option **4** checks again when updating an existing installation and preserves manually bound addresses. Public IPv6 access also requires a public IPv6 address and the corresponding firewall rules. When the server has a public IPv6 address on its interface and Snell listens on IPv6, an extra entry named with a `-v6` suffix is exported alongside the IPv4 entry, using the IPv6 listener's port and the same PSK and mode.
 
 ## Connect with Surge
 

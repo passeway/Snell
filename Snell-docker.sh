@@ -246,6 +246,43 @@ get_public_ip() {
     return 1
 }
 
+# VPS 的公网 IPv6 通常直接配置在网卡上，读取本机地址，不依赖外部查询；
+# 排除 ULA（fc00::/7）以及临时、过期或未完成检测的地址。
+get_public_ipv6() {
+    local address
+    ipv6_available || return 1
+    address=$(ip -6 -o addr show scope global 2>/dev/null | awk '
+        / (temporary|deprecated|tentative|dadfailed) / { next }
+        { split($4, parts, "/"); address=tolower(parts[1]) }
+        address ~ /^[0-9a-f:]+$/ && address ~ /:/ && address !~ /^f[cd]/ { print address; exit }
+    ')
+    [ -n "$address" ] && printf '%s\n' "$address"
+}
+
+# 只在服务监听 IPv6 时导出 IPv6 节点：优先精确地址，其次 [::]，
+# 再次唯一的指定地址端口；无法确定时不导出，不影响 IPv4 节点。
+client_ipv6_port() {
+    local listen="${1//[[:space:]]/}" address="$2" endpoint host port exact="" wildcard="" fallback="" ambiguous=0
+    local -a endpoints
+    IFS=, read -r -a endpoints <<< "$listen"
+    for endpoint in "${endpoints[@]}"; do
+        host=${endpoint%:*}; port=${endpoint##*:}
+        [[ "$host" == \[*\] ]] && valid_port "$port" || continue
+        port=$((10#$port))
+        host=${host#[}; host=${host%]}
+        if [ "${host,,}" = "${address,,}" ]; then exact=${exact:-$port}
+        elif [ "$host" = :: ]; then wildcard=${wildcard:-$port}
+        elif [ -z "$fallback" ]; then fallback=$port
+        elif [ "$fallback" != "$port" ]; then ambiguous=1
+        fi
+    done
+    if [ -n "$exact" ]; then printf '%s\n' "$exact"
+    elif [ -n "$wildcard" ]; then printf '%s\n' "$wildcard"
+    elif [ -n "$fallback" ] && (( !ambiguous )); then printf '%s\n' "$fallback"
+    else return 1
+    fi
+}
+
 get_country() {
     local country
     country=$(curl -4fsS --connect-timeout 3 --max-time 8 "https://ipinfo.io/$1/country" 2>/dev/null) || country=""
@@ -273,6 +310,11 @@ render_client_config() {
     mode=$(config_value mode) || mode=default
     printf '%s = snell, %s, %s, psk=%s, version=6, mode=%s, reuse=true\n' \
         "$label" "$address" "$((10#$port))" "$(surge_value "$psk")" "$mode"
+    # 服务器有公网 IPv6 且服务监听 IPv6 时，额外导出一条 IPv6 节点。
+    if address=$(get_public_ipv6) && port=$(client_ipv6_port "$listen" "$address"); then
+        printf '%s-v6 = snell, %s, %s, psk=%s, version=6, mode=%s, reuse=true\n' \
+            "$label" "$address" "$port" "$(surge_value "$psk")" "$mode"
+    fi
 }
 
 main() {
@@ -301,7 +343,7 @@ main() {
         label=Snell
     fi
     render_client_config "$address" "$label" > "$CLIENT_FILE" && chmod 600 "$CLIENT_FILE" || return 1
-    port=$(awk -F', *' '{print $3}' "$CLIENT_FILE")
+    port=$(awk -F', *' 'NR == 1 {print $3}' "$CLIENT_FILE")
     echo -e "${GREEN}Snell 容器已启动，Surge 代理条目：${RESET}"
     cat "$CLIENT_FILE"
     echo "请在云安全组和系统防火墙中放行 TCP 端口 ${port}。"

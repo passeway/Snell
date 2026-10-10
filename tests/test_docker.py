@@ -17,6 +17,8 @@ class DockerInstallerTests(unittest.TestCase):
         self.root = pathlib.Path(self.temp.name)
         self.code = DOCKER_SOURCE.read_text().replace(
             'BASE_DIR="/root/snell-docker"', f'BASE_DIR="{self.root}"')
+        # The host's own addresses must not leak into exports; IPv6 tests provide fixtures.
+        self.code += '\nip() { return 1; }\n'
         self.config = self.root / 'snell-conf/snell.conf'
 
     def run_shell(self, body, expected=0):
@@ -63,6 +65,23 @@ class DockerInstallerTests(unittest.TestCase):
         self.assertEqual(proxy_fields(line.split('=', 1)[1]),
                          ['snell', '203.0.113.9', '40443', 'psk=a "quoted", secret',
                           'version=6', 'mode=unsafe-raw', 'reuse=true'])
+
+    def test_client_entry_adds_ipv6_node_for_ipv6_listener(self):
+        self.config.parent.mkdir(parents=True)
+        self.config.write_text('[snell-server]\nlisten = 0.0.0.0:40443,[::]:40443\npsk = KeepThisSecret99\nmode = default\n')
+        lines = self.run_shell('get_public_ipv6() { echo 2001:db8::1; }; render_client_config 203.0.113.9 JP').stdout.splitlines()
+        self.assertEqual(lines, [
+            'JP = snell, 203.0.113.9, 40443, psk=KeepThisSecret99, version=6, mode=default, reuse=true',
+            'JP-v6 = snell, 2001:db8::1, 40443, psk=KeepThisSecret99, version=6, mode=default, reuse=true'])
+        self.config.write_text('[snell-server]\nlisten = 0.0.0.0:40443\npsk = KeepThisSecret99\nmode = default\n')
+        lines = self.run_shell('get_public_ipv6() { echo 2001:db8::1; }; render_client_config 203.0.113.9 JP').stdout.splitlines()
+        self.assertEqual(len(lines), 1)
+
+    def test_shared_ipv6_helpers_match_main_installer(self):
+        main, docker = SOURCE.read_text(), DOCKER_SOURCE.read_text()
+        for name in ('get_public_ipv6', 'client_ipv6_port'):
+            pattern = re.compile(r'^' + name + r'\(\) \{\n.*?^\}\n', re.M | re.S)
+            self.assertEqual(pattern.search(docker).group(0), pattern.search(main).group(0), name)
 
     def test_compose_uses_local_v6_build(self):
         self.root.joinpath('snell-conf').mkdir()

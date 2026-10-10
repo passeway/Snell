@@ -31,6 +31,16 @@ install_required_packages''')
         self.assertIn('必要软件包已齐全', result.stdout)
         self.assertNotIn('UNEXPECTED', result.stdout + result.stderr)
 
+    def test_public_ipv6_reads_real_interface_address(self):
+        # CI containers have no global IPv6; a documentation address on lo
+        # exercises the real ip output (no duplicate address detection on lo).
+        subprocess.run(['ip', '-6', 'addr', 'add', '2001:db8::5/128', 'dev', 'lo'], check=True)
+        try:
+            self.assertEqual(self.shell('get_public_ipv6').stdout.strip(), '2001:db8::5')
+        finally:
+            subprocess.run(['ip', '-6', 'addr', 'del', '2001:db8::5/128', 'dev', 'lo'], check=True)
+        self.shell('get_public_ipv6', expected=1)
+
     def shell(self, command, data='', expected=0):
         # Dependencies were installed using install_required_packages when building
         # the CI image. Only network downloads/address discovery use local fixtures.
@@ -67,7 +77,7 @@ ps -o pid,ppid,stat,args
         return result
 
     def assert_traffic(self):
-        fields = self.client.read_text().strip().split(',')
+        fields = self.client.read_text().splitlines()[0].split(',')
         options = dict(item.strip().split('=', 1) for item in fields[3:])
 
         class Handler(http.server.BaseHTTPRequestHandler):
