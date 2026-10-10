@@ -68,7 +68,7 @@ Run as **root**.
 With `bash` and `curl` installed:
 
 ```bash
-bash <(curl -fsSL snell-ten.vercel.app)
+bash <(curl -fsSL https://snell-ten.vercel.app)
 ```
 
 ### Alpine

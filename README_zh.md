@@ -68,7 +68,7 @@ v6 延续了 Snell 的性能与兼容性设计：
 在已安装 `bash`、`curl` 的终端执行：
 
 ```bash
-bash <(curl -fsSL snell-ten.vercel.app)
+bash <(curl -fsSL https://snell-ten.vercel.app)
 ```
 
 ### Alpine
