@@ -29,16 +29,45 @@ get_architecture() {
 }
 
 install_required_packages() {
-    echo -e "${GREEN}安装必要软件包${RESET}"
-    case "$(get_system_type)" in
+    local system package repair="${1:-}" status
+    local -a packages missing=()
+    system=$(get_system_type)
+    case "$system" in
         debian|ubuntu)
-            apt-get update && apt-get -o DPkg::Lock::Timeout=120 install -y wget unzip curl ca-certificates iproute2 coreutils util-linux
+            packages=(wget unzip curl ca-certificates iproute2 coreutils util-linux)
             ;;
         alpine)
-            apk add --no-cache bash wget unzip curl ca-certificates coreutils openrc gcompat libstdc++ iproute2 flock
+            packages=(bash wget unzip curl ca-certificates coreutils openrc gcompat libstdc++ iproute2 flock)
             ;;
         *) echo -e "${RED}仅支持 Debian、Ubuntu 和 Alpine${RESET}"; return 1 ;;
     esac
+    for package in "${packages[@]}"; do
+        if [ "$repair" = repair ]; then
+            missing+=("$package")
+        elif [ "$system" = alpine ]; then
+            apk info -e "$package" >/dev/null 2>&1 || missing+=("$package")
+        else
+            status=$(dpkg-query -W -f='${Status}' "$package" 2>/dev/null) || status=""
+            [[ "$status" == *' ok installed' ]] || missing+=("$package")
+        fi
+    done
+    if [ "${#missing[@]}" -eq 0 ]; then
+        echo -e "${GREEN}必要软件包已齐全${RESET}"
+        return 0
+    fi
+    echo -e "${GREEN}安装必要软件包${RESET}"
+    if [ "$system" = alpine ]; then
+        if [ "$repair" = repair ]; then
+            apk fix --no-cache --reinstall --upgrade "${missing[@]}"
+        else
+            apk add --no-cache "${missing[@]}"
+        fi
+    else
+        local -a options=()
+        [ "$repair" != repair ] || options+=(--reinstall)
+        apt-get -o DPkg::Lock::Timeout=120 update &&
+            apt-get -o DPkg::Lock::Timeout=120 install -y "${options[@]}" "${missing[@]}"
+    fi
 }
 
 fail() {
@@ -353,6 +382,9 @@ listen_with_port() {
     old_port=${listen%%,*}; old_port=${old_port##*:}
     case "$listen" in
         "0.0.0.0:$old_port"|"[::]:$old_port"|"0.0.0.0:$old_port,[::]:$old_port"|"[::]:$old_port,0.0.0.0:$old_port")
+            if [ "$port" = "$old_port" ]; then
+                auto_listen_for_existing "$listen"; return $?
+            fi
             auto_listen_address "$port"; return $? ;;
     esac
     # 自定义绑定地址保留，只替换每个地址的端口。
@@ -499,6 +531,12 @@ _change_snell_port() {
     [ -n "$port" ] || return 0
     valid_port "$port" || { fail "端口无效，请输入 1-65535 的整数"; return 1; }
     port=$((10#$port))
+    new_listen=$(listen_with_port "$listen" "$port") || { fail "监听地址格式无效"; return 1; }
+    if [ "$new_listen" = "${listen//[[:space:]]/}" ]; then
+        echo -e "${YELLOW}当前监听地址无需更改，服务状态保持不变${RESET}"
+        refresh_client_config
+        return $?
+    fi
     # 运行中的当前端口属于本服务；其余情况都检查 TCP 占用。
     if [ "$port" != "$current_port" ] || ! check_snell_running; then
         listeners=$(ss -H -ltn) || { fail "无法检查端口占用"; return 1; }
@@ -507,7 +545,6 @@ _change_snell_port() {
             return 1
         fi
     fi
-    new_listen=$(listen_with_port "$listen" "$port") || { fail "监听地址格式无效"; return 1; }
     apply_snell_setting listen "$new_listen" "监听地址" || return 1
     echo "请在云安全组和系统防火墙中放行 TCP 端口 ${port}。"
 }
@@ -650,9 +687,12 @@ replace_snell_binary() (
         echo -e "${RED}解压 Snell 失败${RESET}"; return 1;
     }
     chmod 755 "$stage/snell-server" || return 1
-    snell_binary_version "$stage/snell-server" || {
-        echo -e "${RED}新程序无法运行或检查超时，请检查架构和运行依赖${RESET}"; return 1;
-    }
+    if ! snell_binary_version "$stage/snell-server"; then
+        echo -e "${YELLOW}新程序检查失败，修复依赖后重试一次${RESET}"
+        install_required_packages repair && snell_binary_version "$stage/snell-server" || {
+            echo -e "${RED}新程序无法运行或检查超时，请检查架构和运行依赖${RESET}"; return 1;
+        }
+    fi
     mv -f "$stage/snell-server" /usr/local/bin/snell-server
 )
 
@@ -669,11 +709,7 @@ check_root() {
 
 
 check_snell_installed() {
-    if command -v snell-server &> /dev/null; then
-        return 0
-    else
-        return 1
-    fi
+    [ -f /usr/local/bin/snell-server ] && [ -x /usr/local/bin/snell-server ]
 }
 
 snell_service_file_exists() {
@@ -949,6 +985,39 @@ EOF
 
 update_snell() { with_snell_lock _update_snell "$@"; }
 
+# 仅做本地预检；不依赖公网地址或客户端导出，也不启动第二个服务进程。
+preflight_snell_update() {
+    local LC_ALL=C original="$1" listen="$1" new_listen psk mode preference endpoint
+    local -a endpoints
+    psk=$(config_value psk) || {
+        fail "服务端配置无效或缺少 listen、psk，已取消更新"; return 1;
+    }
+    (( ${#psk} >= 12 && ${#psk} <= 255 )) || { fail "服务端 PSK 长度必须为 12-255 字节"; return 1; }
+    mode=$(config_value mode) || mode=default
+    case "$mode" in default|unshaped|unsafe-raw) ;; *) fail "服务端 mode 无效"; return 1 ;; esac
+    preference=$(config_value dns-ip-preference /etc/snell/snell-server.conf ipv-preference) || preference=default
+    case "$preference" in
+        default|prefer-ipv4|prefer-ipv6|ipv4-only|ipv6-only) ;;
+        *) fail "服务端 DNS 模式无效"; return 1 ;;
+    esac
+    listen=${listen//[[:space:]]/}
+    [[ -n "$listen" && "$listen" != ,* && "$listen" != *, && "$listen" != *,,* ]] || {
+        fail "监听地址格式无效"; return 1;
+    }
+    IFS=, read -r -a endpoints <<< "$listen"
+    for endpoint in "${endpoints[@]}"; do
+        [[ "$endpoint" =~ ^(\[[^][,[:space:]]+\]|[^][,:[:space:]]+):([0-9]{1,5})$ ]] &&
+            valid_port "${BASH_REMATCH[2]}" || { fail "监听地址或端口无效"; return 1; }
+    done
+    new_listen=$(auto_listen_for_existing "$original") || { fail "无法生成监听地址"; return 1; }
+    if [ "$new_listen" != "$original" ]; then
+        render_server_setting listen "$new_listen" >/dev/null || {
+            fail "无法修改监听地址，请检查服务端配置节"; return 1;
+        }
+    fi
+    printf '%s\n' "$new_listen"
+}
+
 _update_snell() {
     local was_running=0 listen new_listen
     if [ ! -f "/usr/local/bin/snell-server" ]; then
@@ -964,14 +1033,14 @@ _update_snell() {
         fail "服务正在切换状态或无法确认状态，请稍后重试更新"
         return 1
     fi
+    listen=$(config_value listen) || { fail "服务端配置无效或缺少 listen，已取消更新"; return 1; }
+    new_listen=$(preflight_snell_update "$listen") || return 1
     install_required_packages || return 1
     secure_config_files || { fail "设置配置文件权限失败"; return 1; }
     replace_snell_binary || return 1
     if [ "$(get_system_type)" = alpine ]; then
         write_openrc_service || return 1
     fi
-    listen=$(config_value listen) || { fail "无法读取监听地址"; return 1; }
-    new_listen=$(auto_listen_for_existing "$listen") || { fail "无法生成监听地址"; return 1; }
     if [ "$new_listen" != "$listen" ]; then
         apply_snell_setting listen "$new_listen" "监听地址" 0 || return 1
     elif (( was_running )); then

@@ -1,5 +1,6 @@
 """Real Snell v6 traffic using the installer template and an independent client."""
 import http.server
+import io
 import json
 import os
 from pathlib import Path
@@ -92,6 +93,15 @@ class CoreTests(unittest.TestCase):
     def test_unsafe_raw_mode_relays_real_traffic(self):
         self.check_mode_traffic('unsafe-raw', '3')
 
+    def test_default_mode_relays_real_udp(self):
+        self.check_mode_traffic('default', '1', udp=True)
+
+    def test_unshaped_mode_relays_real_udp(self):
+        self.check_mode_traffic('unshaped', '2', udp=True)
+
+    def test_unsafe_raw_mode_relays_real_udp(self):
+        self.check_mode_traffic('unsafe-raw', '3', udp=True)
+
     def test_ipv4_only_listener_relays_real_traffic(self):
         self.check_mode_traffic('default', '1', ipv6=False)
 
@@ -124,8 +134,61 @@ class CoreTests(unittest.TestCase):
         self.check_mode_traffic('default', '1', dns=('4', 'ipv4-only', b'ipv4'),
                                dns_alias_conflict='continued')
 
+    def assert_udp_traffic(self, local_port):
+        """SOCKS5 UDP ASSOCIATE -> sing-box -> Snell -> real UDP echo socket."""
+        def receive_exact(sock, size):
+            data = b''
+            while len(data) < size:
+                chunk = sock.recv(size - len(data))
+                self.assertTrue(chunk, 'SOCKS5 control connection closed early')
+                data += chunk
+            return data
+
+        def read_address(read):
+            kind = read(1)
+            if kind == b'\x01':
+                address = socket.inet_ntop(socket.AF_INET, read(4))
+            elif kind == b'\x04':
+                address = socket.inet_ntop(socket.AF_INET6, read(16))
+            elif kind == b'\x03':
+                address = read(read(1)[0]).decode('ascii')
+            else:
+                self.fail(f'Invalid SOCKS5 address type: {kind!r}')
+            return address, struct.unpack('!H', read(2))[0]
+
+        for family, address, kind in ((socket.AF_INET, '127.0.0.1', b'\x01'),
+                                       (socket.AF_INET6, '::1', b'\x04')):
+            with self.subTest(udp_destination=address):
+                with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as client_udp, \
+                        socket.socket(family, socket.SOCK_DGRAM) as target, \
+                        socket.create_connection(('127.0.0.1', local_port), timeout=5) as control:
+                    client_udp.bind(('127.0.0.1', 0)); client_udp.settimeout(5)
+                    target.bind((address, 0)); target.settimeout(5)
+                    control.sendall(b'\x05\x01\x00')
+                    self.assertEqual(receive_exact(control, 2), b'\x05\x00')
+                    # Keep this control connection open for the entire UDP association.
+                    control.sendall(b'\x05\x03\x00\x01' + socket.inet_aton('127.0.0.1') +
+                                    struct.pack('!H', client_udp.getsockname()[1]))
+                    self.assertEqual(receive_exact(control, 3), b'\x05\x00\x00')
+                    relay_host, relay_port = read_address(lambda size: receive_exact(control, size))
+                    self.assertIn(relay_host, ('127.0.0.1', '0.0.0.0'))
+                    self.assertGreater(relay_port, 0)
+                    destination_port = target.getsockname()[1]
+                    header = b'\x00\x00\x00' + kind + socket.inet_pton(family, address) + struct.pack('!H', destination_port)
+                    for payload in (b'snell-v6-udp-regression', os.urandom(1200)):
+                        client_udp.sendto(header + payload, ('127.0.0.1', relay_port))
+                        received, peer = target.recvfrom(65535)
+                        self.assertEqual(received, payload)
+                        reply = b'echo:' + received[::-1]
+                        target.sendto(reply, peer)
+                        packet, _ = client_udp.recvfrom(65535)
+                        reader = io.BytesIO(packet)
+                        self.assertEqual(reader.read(3), b'\x00\x00\x00')
+                        self.assertEqual(read_address(reader.read), (address, destination_port))
+                        self.assertEqual(reader.read(), reply)
+
     def check_mode_traffic(self, mode, selection, ipv6=True, dns=None, change_port=False,
-                          split_ports=False, dns_alias_conflict=False, manual_ini=False, psk_override=None):
+                          split_ports=False, dns_alias_conflict=False, manual_ini=False, psk_override=None, udp=False):
         with tempfile.TemporaryDirectory(prefix='snell-core-') as td:
             root = Path(td)
             processes = []
@@ -250,6 +313,9 @@ check_snell_stopped() { :; }; chown() { :; }; change_snell_config''', 'dns-test'
                         self.assertIn(response.stdout, [dns[2]] if dns[2] else [b'ipv4', b'ipv6'])
                     else:
                         self.assertEqual(response.stdout, b'snell-v6-regression-ok')
+                    if udp:
+                        with self.subTest(snell_peer=peer):
+                            self.assert_udp_traffic(local_port)
                     client.terminate()
                     client.wait(timeout=5)
                 if not ipv6:
