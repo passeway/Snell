@@ -12,7 +12,7 @@ import threading
 import time
 import unittest
 
-from test_snell import SOURCE
+from test_snell import SOURCE, proxy_fields
 
 SNELL = os.environ.get('SNELL_TEST_BINARY', '')
 CLIENT = os.environ.get('SING_BOX_TEST_BINARY', '')
@@ -111,7 +111,21 @@ class CoreTests(unittest.TestCase):
     def test_conflicting_dns_alias_is_corrected_for_real_traffic(self):
         self.check_mode_traffic('default', '1', dns=('4', 'ipv4-only', b'ipv4'), dns_alias_conflict=True)
 
-    def check_mode_traffic(self, mode, selection, ipv6=True, dns=None, change_port=False, split_ports=False, dns_alias_conflict=False):
+    def test_literal_hash_and_quoted_psk_relay_real_traffic(self):
+        self.check_mode_traffic('default', '1', psk_override=r'Example,"quoted"\path #suffix')
+
+    def test_continued_mode_exports_effective_core_value(self):
+        self.check_mode_traffic('unshaped', '2', manual_ini=True)
+
+    def test_editing_continued_mode_preserves_psk_and_real_traffic(self):
+        self.check_mode_traffic('default', '1', manual_ini=True, psk_override='ExampleKey #suffix')
+
+    def test_dns_alias_continuation_is_removed_for_real_traffic(self):
+        self.check_mode_traffic('default', '1', dns=('4', 'ipv4-only', b'ipv4'),
+                               dns_alias_conflict='continued')
+
+    def check_mode_traffic(self, mode, selection, ipv6=True, dns=None, change_port=False,
+                          split_ports=False, dns_alias_conflict=False, manual_ini=False, psk_override=None):
         with tempfile.TemporaryDirectory(prefix='snell-core-') as td:
             root = Path(td)
             processes = []
@@ -147,7 +161,7 @@ class CoreTests(unittest.TestCase):
                 version = subprocess.run([SNELL, '-v'], capture_output=True, text=True, check=True, timeout=10)
                 self.assertIn('snell-server v6.', version.stdout + version.stderr)
                 port = free_port()
-                psk = secrets.token_hex(24)
+                psk = psk_override if psk_override is not None else secrets.token_hex(24)
                 script = root / 'installer.sh'
                 script.write_text(SOURCE.read_text().replace('/etc/snell', str(root)))
                 detect = '' if ipv6 else 'ipv6_available() { return 1; }; '
@@ -170,9 +184,13 @@ class CoreTests(unittest.TestCase):
                     config += f'\ndns = {dns_server.address}\n'
                     config = config.replace('dns-ip-preference = default', 'dns-ip-preference = ipv4-only')
                     if dns_alias_conflict:
-                        config += 'ipv-preference = ipv6-only\n'
+                        config += ('ipv-preference = default\n  ipv6-only\n' if dns_alias_conflict == 'continued'
+                                   else 'ipv-preference = ipv6-only\n')
                 if mode == 'default':
                     config = config.replace('mode = default', 'mode = unshaped')
+                if manual_ini:
+                    config = ('\ufeff[snell-server]\n listen: ' + listen + '\npsk: ' + psk +
+                              '\nmode: default\n  unshaped\ndns-ip-preference: default\n')
                 (root / 'snell-server.conf').write_text(config + '\n')
                 (root / 'snell-client.conf').write_text(
                     f'Test = snell, 203.0.113.1, {port}, psk={psk}, version=6, mode=default\n')
@@ -201,11 +219,11 @@ check_snell_stopped() { :; }; chown() { :; }; change_snell_config''', 'dns-test'
                     self.assertIn('dns-ip-preference = ' + dns[1], (root / 'snell-server.conf').read_text())
                     if dns_alias_conflict:
                         self.assertNotIn('\nipv-preference', (root / 'snell-server.conf').read_text())
-                fields = dict(field.strip().split('=', 1) for field in
-                              (root / 'snell-client.conf').read_text().split(',')[3:])
+                entry = proxy_fields((root / 'snell-client.conf').read_text())
+                fields = dict(field.split('=', 1) for field in entry[3:])
                 self.assertEqual(fields['mode'], mode)
                 self.assertEqual(fields['psk'], psk)
-                self.assertEqual(int((root / 'snell-client.conf').read_text().split(',')[2]), port)
+                self.assertEqual(int(entry[2]), port)
                 server = start([SNELL, '-l', 'info', '-c', str(root / 'snell-server.conf')], 'server.log')
                 wait_port(port, server)
                 # Both inbound families must carry proxy traffic, not merely accept TCP.

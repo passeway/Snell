@@ -3,6 +3,7 @@ import os
 import pathlib
 import pty
 import select
+import shlex
 import signal
 import subprocess
 import tempfile
@@ -10,6 +11,15 @@ import time
 import unittest
 
 SOURCE = pathlib.Path(__file__).resolve().parents[1] / 'Snell.sh'
+
+
+def proxy_fields(text):
+    """Decode quoted proxy values independently using the standard lexer."""
+    lexer = shlex.shlex(text, posix=True)
+    lexer.whitespace = ','
+    lexer.whitespace_split = True
+    lexer.commenters = ''
+    return [field.strip() for field in lexer]
 
 
 class SnellTests(unittest.TestCase):
@@ -107,7 +117,7 @@ class SnellTests(unittest.TestCase):
 
     def test_missing_mode_defaults_and_comments(self):
         self.server.write_text('[other]\npsk=wrong\n[snell-server]\n'
-                               ' listen = 0.0.0.0:45678 # note\n psk = CorrectSecret=123456\n')
+                               ' listen = 0.0.0.0:45678 ; note\npsk = CorrectSecret=123456\n')
         self.client.write_text('HK = snell, 203.0.113.1, 1, psk=old\n')
         output = self.run_shell('refresh_client_config').stdout
         self.assertIn('45678, psk=CorrectSecret=123456', output)
@@ -477,7 +487,7 @@ restart_snell() { echo UNEXPECTED_RESTART; }; switch_snell_mode''', '1\n')
         self.assertNotIn('UNEXPECTED_RESTART', result.stdout)
 
     def test_mode_switch_normalizes_only_the_server_mode(self):
-        for mode_lines in ('', '  mode = default # old\nmode=default\n'):
+        for mode_lines in ('', '  mode = default ; old\nmode=default\n'):
             self.prepare_mode_switch()
             self.server.write_text('[other]\nmode = keep\n[snell-server] ; note\n'
                                    '# mode = comment\n' + mode_lines +
@@ -487,9 +497,9 @@ restart_snell() { echo UNEXPECTED_RESTART; }; switch_snell_mode''', '1\n')
 check_snell_running() { return 1; }; check_snell_stopped() { :; }
 switch_snell_mode''', '2\n')
             self.assertEqual(self.server.read_text(),
-                             '[other]\nmode = keep\n[snell-server] ; note\nmode = unshaped\n'
+                             '[other]\nmode = keep\n[snell-server] ; note\n'
                              '# mode = comment\nlisten = 0.0.0.0:40443\npsk = Secret123456789\n'
-                             'dns-ip-preference = ipv4\n[extra]\nmode = keep-too\n')
+                             'dns-ip-preference = ipv4\nmode = unshaped\n[extra]\nmode = keep-too\n')
 
     def test_mode_switch_invalid_config_does_not_write_files(self):
         for config in ('[other]\nmode=default\n',
@@ -988,6 +998,109 @@ snell_listener_pid() {{ return {0 if healthy else 1}; }}; show_menu''', '0\n')
             self.assertIn('3. 停止 Snell 服务', result.stdout)
             if not healthy:
                 self.assertNotIn('已启动', result.stdout)
+
+    def test_menu_uninstalls_residual_files_without_executable_core(self):
+        for system in ('debian', 'ubuntu', 'alpine'):
+            for binary_state in ('missing', 'not-executable'):
+                with self.subTest(system=system, binary=binary_state):
+                    self.server.parent.mkdir(parents=True, exist_ok=True)
+                    self.server_config()
+                    if binary_state == 'not-executable':
+                        self.binary.write_text('partial download'); self.binary.chmod(0o600)
+                    service = self.root / ('etc/init.d/snell' if system == 'alpine'
+                                           else 'etc/systemd/system/snell.service')
+                    service.write_text('residual service')
+                    result = self.run_shell(f'''PATH='{self.binary.parent}:/usr/bin:/bin'
+get_system_type() {{ echo {system}; }}; clear() {{ :; }}; check_root() {{ :; }}
+check_snell_running() {{ return 1; }}; check_snell_stopped() {{ :; }}
+service_action() {{ [ "$1" = stop ]; }}; systemctl() {{ :; }}; rc-update() {{ :; }}
+main''', '2\n\n0\n')
+                    self.assertIn('Snell 卸载成功', result.stdout)
+                    self.assertFalse(service.exists())
+                    self.assertFalse(self.binary.exists())
+                    self.assertFalse(self.server.parent.exists())
+
+    def test_uninstall_preserves_files_if_process_survives_service_stop(self):
+        self.server_config(); self.binary.write_text('installed core')
+        service = self.root / 'etc/systemd/system/snell.service'
+        service.write_text('existing service')
+        result = self.run_shell('''service_action() { echo STOP_REQUESTED; }
+check_snell_stopped() { :; }; snell_process_exists() { return 0; }
+systemctl() { echo UNEXPECTED_DISABLE; }; uninstall_snell''', expected=1)
+        self.assertIn('STOP_REQUESTED', result.stdout)
+        self.assertNotIn('UNEXPECTED_DISABLE', result.stdout)
+        self.assertNotIn('卸载成功', result.stdout)
+        self.assertIn('进程仍在运行', result.stderr)
+        self.assertTrue(service.exists() and self.binary.exists() and self.server.exists())
+
+    def test_update_client_failure_is_reported_as_partial_completion(self):
+        self.prepare_mode_switch(); self.binary.write_text('installed core')
+        before = self.client.read_bytes()
+        for failure in ('render', 'write'):
+            failing_step = ('render_client_config() { return 1; }' if failure == 'render'
+                            else 'write_file() { cat >/dev/null; return 1; }')
+            result = self.run_shell('''check_snell_running() { :; }; ipv6_available() { :; }
+install_required_packages() { :; }; replace_snell_binary() { :; }
+restart_snell() { :; }; show_logs() { :; }
+''' + failing_step + '; update_snell', expected=1)
+            self.assertNotIn('更新成功', result.stdout)
+            self.assertIn('内核已更新，但客户端配置生成或写入失败', result.stderr)
+            self.assertEqual(self.client.read_bytes(), before)
+
+    def test_export_preserves_literal_psk_and_quotes_surge_delimiters(self):
+        for psk in ('ExampleKey #suffix', r'Example,"quoted"\path #suffix',
+                    'ExampleKey;literal', 'ExampleKey //literal'):
+            self.server.write_text('[snell-server]\nlisten=0.0.0.0:40443\npsk=' + psk + '\n')
+            self.client.write_text('Test = snell, 203.0.113.1, 40443, psk=old\n')
+            self.run_shell('refresh_client_config')
+            options = dict(field.split('=', 1) for field in proxy_fields(self.client.read_text())[3:])
+            self.assertEqual(options['psk'], psk)
+            self.assertIn('psk="', self.client.read_text())
+
+    def test_invalid_psk_lengths_preserve_client(self):
+        for psk in ('short', 'a' * 256, '密' * 86):
+            self.server.write_text('[snell-server]\nlisten=0.0.0.0:40443\npsk=' + psk + '\n')
+            self.client.write_text('keep existing client')
+            self.run_shell('refresh_client_config', expected=1)
+            self.assertEqual(self.client.read_text(), 'keep existing client')
+
+    def test_ini_continuations_follow_previous_key_even_with_delimiters(self):
+        self.server.write_text('\ufeff[snell-server]\nlisten:0.0.0.0:40443\n'
+                               'psk:OriginalSecret123\n  AnotherSecret #literal\n'
+                               'mode:default\n  unshaped\n'
+                               'dns-ip-preference:ipv4-only\n  ipv6-only\n')
+        for key, expected in [('psk', 'AnotherSecret #literal'), ('mode', 'unshaped'),
+                              ('dns-ip-preference', 'ipv6-only')]:
+            self.assertEqual(self.run_shell('config_value ' + key).stdout.strip(), expected)
+        self.server.write_text('[snell-server]\npsk=OriginalSecret123\n mode=unshaped\n')
+        self.assertEqual(self.run_shell('config_value psk').stdout.strip(), 'mode=unshaped')
+        self.run_shell('config_value mode', expected=1)
+        self.server.write_text('[snell-server]\nmode=default\n unshaped ; literal\n')
+        self.assertEqual(self.run_shell('config_value mode').stdout.strip(), 'unshaped ; literal')
+
+    def test_mode_edit_removes_continuations_and_preserves_other_fields(self):
+        for first_line in (' listen = 0.0.0.0:40443\n', 'listen:0.0.0.0:40443\n'):
+            self.server.write_text('[snell-server]\n' + first_line +
+                                   'psk=ExampleKey #suffix\nmode=default\n  unshaped\n'
+                                   '# retained comment\n[other]\nmode=untouched\n')
+            self.client.write_text('Test = snell, 203.0.113.1, 40443, psk=old\n')
+            result = self.run_shell('''check_snell_installed() { :; }; check_snell_running() { return 1; }
+check_snell_stopped() { :; }; switch_snell_mode''', '1\n')
+            self.assertIn('当前配置模式: unshaped', result.stdout)
+            self.assertNotIn('  unshaped', self.server.read_text())
+            self.assertIn('# retained comment', self.server.read_text())
+            self.assertIn('[other]\nmode=untouched', self.server.read_text())
+            self.assertEqual(self.run_shell('config_value psk').stdout.strip(), 'ExampleKey #suffix')
+            self.assertEqual(self.run_shell('config_value mode').stdout.strip(), 'default')
+
+    def test_ini_section_names_are_literal_and_malformed_input_is_rejected(self):
+        for section in ('[ snell-server ]', '[snell - server]'):
+            self.server.write_text(section + '\nmode=default\n')
+            self.run_shell('config_value mode', expected=1)
+            self.run_shell('render_server_setting mode unshaped', expected=2)
+        self.server.write_text('[snell-server]\nmode=default\n[broken\n')
+        self.run_shell('config_value mode', expected=2)
+        self.run_shell('render_server_setting mode unshaped', expected=2)
 
 
 if __name__ == '__main__':
