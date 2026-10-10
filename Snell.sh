@@ -180,7 +180,7 @@ get_country() {
 }
 
 config_value() {
-    awk -v key="$1" '
+    awk -v key="$1" -v alias="${3:-}" '
         /^[[:space:]]*\[/ {
             section=$0
             sub(/[[:space:]]*[#;].*$/, "", section)
@@ -191,7 +191,7 @@ config_value() {
         active && /^[[:space:]]*[^#;][^=]*=/ {
             name=$0; sub(/=.*/, "", name)
             gsub(/^[[:space:]]+|[[:space:]]+$/, "", name)
-            if (name == key) {
+            if (name == key || (alias != "" && name == alias)) {
                 value=$0; sub(/^[^=]*=/, "", value)
                 sub(/[[:space:]]+[#;].*$/, "", value)
                 gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
@@ -374,7 +374,7 @@ _apply_snell_setting() (
     restore_config_on_failure() {
         local failed=0
         (( server_written || client_written )) || return 0
-        trap '' INT TERM
+        trap '' HUP INT TERM
         if (( server_written )); then
             write_file /etc/snell/snell-server.conf 640 root:snell <<< "$old_server" || failed=1
         fi
@@ -395,19 +395,21 @@ _apply_snell_setting() (
         fi
     }
     trap restore_config_on_failure EXIT
+    trap 'exit 129' HUP
     trap 'exit 130' INT
     trap 'exit 143' TERM
-    write_file /etc/snell/snell-server.conf 640 root:snell <<< "$new_server" || return 1
+    # 写入可能已完成、但函数尚未返回时也会收到信号；先登记恢复责任。
     server_written=1
+    write_file /etc/snell/snell-server.conf 640 root:snell <<< "$new_server" || return 1
     if (( sync_client )); then
-        write_file /etc/snell/snell-client.conf 600 root:root <<< "$new_client" || return 1
         client_written=1
+        write_file /etc/snell/snell-client.conf 600 root:root <<< "$new_client" || return 1
     fi
     if (( was_running )); then
         restart_attempted=1
         restart_snell || return 1
     fi
-    trap - EXIT INT TERM
+    trap - EXIT HUP INT TERM
     if (( was_running )); then
         echo -e "${GREEN}Snell ${label}已更改为 ${value}，服务已重启${RESET}"
     else
@@ -483,8 +485,8 @@ switch_snell_dns() { with_snell_lock _switch_snell_dns "$@"; }
 _switch_snell_dns() {
     local current selection preference
     require_snell_config || return 1
-    if current=$(config_value dns-ip-preference); then :
-    elif current=$(config_value ipv-preference); then :
+    # 两个名称是同一设置，内核采用文件中最后出现的值。
+    if current=$(config_value dns-ip-preference /etc/snell/snell-server.conf ipv-preference); then :
     elif [ "$(config_value ipv6)" = false ]; then current=ipv4-only
     else current=default
     fi
@@ -505,7 +507,7 @@ _switch_snell_dns() {
         0|"") return 0 ;;
         *) fail "无效的选项"; return 1 ;;
     esac
-    if [ "$preference" = "$current" ]; then
+    if [ "$preference" = "$current" ] && ! config_value ipv-preference >/dev/null; then
         echo "当前已配置此 DNS 模式"
         return 0
     fi
@@ -642,6 +644,48 @@ check_snell_installed() {
     fi
 }
 
+snell_service_file_exists() {
+    if [ "$(get_system_type)" = alpine ]; then
+        [ -f /etc/init.d/snell ]
+    else
+        [ -f /etc/systemd/system/snell.service ]
+    fi
+}
+
+snell_service_enabled() {
+    if [ "$(get_system_type)" = alpine ]; then
+        [ -e /etc/runlevels/default/snell ]
+    else
+        systemctl is-enabled --quiet snell.service
+    fi
+}
+
+register_snell_service() {
+    if [ "$(get_system_type)" = alpine ]; then
+        rc-update add snell default
+    else
+        systemctl daemon-reload && systemctl enable snell.service
+    fi
+}
+
+# 服务文件缺失时，仍不能删除正在运行的内核或配置。
+snell_process_exists() {
+    local entry executable
+    for entry in /proc/[0-9]*/exe; do
+        executable=$(readlink "$entry" 2>/dev/null) || continue
+        case "$executable" in
+            /usr/local/bin/snell-server|'/usr/local/bin/snell-server (deleted)') return 0 ;;
+            /lib/ld-musl-*.so.1)
+                awk -v binary=/usr/local/bin/snell-server '
+                    $2 ~ /x/ && $6 == binary { found=1 }
+                    END { exit !found }
+                ' "${entry%/exe}/maps" 2>/dev/null && return 0
+                ;;
+        esac
+    done
+    return 1
+}
+
 check_snell_running() {
     if [ "$(get_system_type)" = alpine ]; then
         rc-service snell status >/dev/null 2>&1
@@ -769,45 +813,76 @@ _stop_snell() {
 install_snell() { with_snell_lock _install_snell "$@"; }
 
 _install_snell() {
-    if [ -e /etc/snell/snell-server.conf ] || [ -e /usr/local/bin/snell-server ]; then
-        echo -e "${YELLOW}已有 Snell 配置或内核，已取消重复安装；现有配置保持不变。${RESET}"
-        return 0
+    local has_config=0 has_binary=0 has_service=0
+    [ ! -f /etc/snell/snell-server.conf ] || has_config=1
+    [ ! -x /usr/local/bin/snell-server ] || has_binary=1
+    snell_service_file_exists && has_service=1
+    if (( has_config && has_binary && has_service )); then
+        if snell_service_enabled; then
+            echo -e "${YELLOW}Snell 已完整安装，已取消重复安装；现有配置保持不变。${RESET}"
+            return 0
+        elif check_snell_running; then
+            register_snell_service || return 1
+            echo "已补齐 Snell 开机启动设置，现有配置和运行状态保持不变。"
+            return 0
+        fi
+    fi
+    if (( has_service )); then
+        if ! check_snell_stopped; then
+            fail "安装文件不完整，且服务尚未停止或状态不明；请先停止服务再重试"
+            return 1
+        fi
+    elif snell_process_exists; then
+        fail "服务文件缺失但 Snell 进程仍在运行，请先停止该进程再重试"
+        return 1
     fi
     echo -e "${GREEN}正在安装 Snell${RESET}"
+    if (( has_config || has_binary || has_service )); then
+        echo "检测到未完成的安装，将补齐缺失文件并保留已有配置。"
+    fi
 
     get_architecture >/dev/null || return 1
     install_required_packages || return 1
-    replace_snell_binary || return 1
-    RANDOM_PORT=$(choose_port) || return 1
-    LISTEN_ADDRESS=$(auto_listen_address "$RANDOM_PORT") || return 1
-    RANDOM_PSK=$(LC_ALL=C tr -dc A-Za-z0-9 </dev/urandom | head -c 48)
-    [ "${#RANDOM_PSK}" -eq 48 ] || { fail "生成 PSK 失败"; return 1; }
+    if (( !has_binary )); then replace_snell_binary || return 1; fi
+    if (( !has_config )); then
+        RANDOM_PORT=$(choose_port) || return 1
+        LISTEN_ADDRESS=$(auto_listen_address "$RANDOM_PORT") || return 1
+        RANDOM_PSK=$(LC_ALL=C tr -dc A-Za-z0-9 </dev/urandom | head -c 48)
+        [ "${#RANDOM_PSK}" -eq 48 ] || { fail "生成 PSK 失败"; return 1; }
+    fi
 
+    if ! getent group snell >/dev/null; then
+        if [ "$(get_system_type)" = alpine ]; then
+            addgroup -S snell || { fail "创建 snell 用户组失败"; return 1; }
+        else
+            groupadd -r snell || { fail "创建 snell 用户组失败"; return 1; }
+        fi
+    fi
     if ! id "snell" &>/dev/null; then
         if [ "$(get_system_type)" = alpine ]; then
-            if ! getent group snell >/dev/null; then
-                addgroup -S snell || { fail "创建 snell 用户组失败"; return 1; }
-            fi
             adduser -S -D -H -s /sbin/nologin -G snell snell || { fail "创建 snell 用户失败"; return 1; }
         else
-            useradd -r -s /usr/sbin/nologin snell || { fail "创建 snell 用户失败"; return 1; }
+            useradd -r -g snell -s /usr/sbin/nologin snell || { fail "创建 snell 用户失败"; return 1; }
         fi
     fi
 
     secure_config_directory || { fail "创建配置目录或设置权限失败"; return 1; }
-    write_file /etc/snell/snell-server.conf 640 root:snell << EOF || return 1
+    if (( !has_config )); then
+        write_file /etc/snell/snell-server.conf 640 root:snell << EOF || return 1
 [snell-server]
 mode = default
 listen = ${LISTEN_ADDRESS}
 psk = ${RANDOM_PSK}
 dns-ip-preference = default
 EOF
+    fi
+    secure_config_files || { fail "设置配置文件权限失败"; return 1; }
 
-    if [ "$(get_system_type)" = alpine ]; then
-        write_openrc_service || return 1
-        rc-update add snell default || return 1
-    else
-    write_file /etc/systemd/system/snell.service 644 root:root << EOF || return 1
+    if (( !has_service )); then
+        if [ "$(get_system_type)" = alpine ]; then
+            write_openrc_service || return 1
+        else
+            write_file /etc/systemd/system/snell.service 644 root:root << EOF || return 1
 [Unit]
 Description=Snell Proxy Service
 After=network.target
@@ -828,10 +903,9 @@ SyslogIdentifier=snell-server
 [Install]
 WantedBy=multi-user.target
 EOF
-
-
-        systemctl daemon-reload && systemctl enable snell || return 1
+        fi
     fi
+    register_snell_service || return 1
     restart_snell || { fail "Snell 安装后启动失败"; return 1; }
     remove_snell_log_files || { fail "清理 Snell 旧日志文件失败"; return 1; }
     echo -e "${GREEN}Snell 服务已启动${RESET}"
@@ -886,18 +960,27 @@ _update_snell() {
 uninstall_snell() { with_snell_lock _uninstall_snell "$@"; }
 
 _uninstall_snell() {
+    local has_service=0
     echo -e "${GREEN}正在卸载 Snell${RESET}"
-    # 无论当前处于启动、重启还是停止状态，都先执行停止并核实结果。
-    stop_snell || return 1
+    snell_service_file_exists && has_service=1
+    if (( has_service )) || check_snell_running; then
+        # 无论当前处于启动、重启还是停止状态，都先执行停止并核实结果。
+        stop_snell || return 1
+    elif snell_process_exists; then
+        fail "服务文件缺失但 Snell 进程仍在运行，保留现有文件；请先停止该进程"
+        return 1
+    fi
     if [ "$(get_system_type)" = alpine ]; then
-        rc-update del snell default || return 1
+        if (( has_service )); then rc-update del snell default || return 1; fi
+        rm -f /etc/runlevels/default/snell || return 1
         rm -f /etc/init.d/snell || return 1
         remove_snell_log_files || return 1
     else
-        systemctl disable snell || return 1
+        if (( has_service )); then systemctl disable snell || return 1; fi
+        rm -f /etc/systemd/system/multi-user.target.wants/snell.service || return 1
         rm -f /etc/systemd/system/snell.service && systemctl daemon-reload || return 1
     fi
-    rm /usr/local/bin/snell-server && rm -rf /etc/snell || { fail "清理 Snell 文件失败"; return 1; }
+    rm -f /usr/local/bin/snell-server && rm -rf /etc/snell || { fail "清理 Snell 文件失败"; return 1; }
     echo -e "${GREEN}Snell 卸载成功${RESET}"
 }
 
@@ -922,7 +1005,11 @@ show_menu() {
         fi
 
         if [ $snell_running -eq 0 ]; then
-            running_status="${GREEN}已启动${RESET}"
+            if snell_listener_pid >/dev/null 2>&1; then
+                running_status="${GREEN}已启动${RESET}"
+            else
+                running_status="${RED}异常（内核进程或监听不可用）${RESET}"
+            fi
         else
             running_status="${RED}未启动${RESET}"
         fi
