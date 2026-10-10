@@ -108,7 +108,10 @@ class CoreTests(unittest.TestCase):
             with self.subTest(preference=preference):
                 self.check_mode_traffic('default', '1', dns=(selection, preference, expected))
 
-    def check_mode_traffic(self, mode, selection, ipv6=True, dns=None, change_port=False, split_ports=False):
+    def test_conflicting_dns_alias_is_corrected_for_real_traffic(self):
+        self.check_mode_traffic('default', '1', dns=('4', 'ipv4-only', b'ipv4'), dns_alias_conflict=True)
+
+    def check_mode_traffic(self, mode, selection, ipv6=True, dns=None, change_port=False, split_ports=False, dns_alias_conflict=False):
         with tempfile.TemporaryDirectory(prefix='snell-core-') as td:
             root = Path(td)
             processes = []
@@ -166,6 +169,8 @@ class CoreTests(unittest.TestCase):
                 if dns_server:
                     config += f'\ndns = {dns_server.address}\n'
                     config = config.replace('dns-ip-preference = default', 'dns-ip-preference = ipv4-only')
+                    if dns_alias_conflict:
+                        config += 'ipv-preference = ipv6-only\n'
                 if mode == 'default':
                     config = config.replace('mode = default', 'mode = unshaped')
                 (root / 'snell-server.conf').write_text(config + '\n')
@@ -194,6 +199,8 @@ check_snell_installed() { :; }; check_snell_running() { return 1; }
 check_snell_stopped() { :; }; chown() { :; }; change_snell_config''', 'dns-test', str(script)],
                                    input='3\n' + dns[0] + '\n', text=True, capture_output=True, check=True, timeout=10)
                     self.assertIn('dns-ip-preference = ' + dns[1], (root / 'snell-server.conf').read_text())
+                    if dns_alias_conflict:
+                        self.assertNotIn('\nipv-preference', (root / 'snell-server.conf').read_text())
                 fields = dict(field.strip().split('=', 1) for field in
                               (root / 'snell-client.conf').read_text().split(',')[3:])
                 self.assertEqual(fields['mode'], mode)

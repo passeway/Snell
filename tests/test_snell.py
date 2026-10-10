@@ -20,7 +20,7 @@ class SnellTests(unittest.TestCase):
         self.code = SOURCE.read_text().replace('if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then\n    main\nfi\n', '')
         for path in ['/usr/local/bin', '/etc/snell', '/etc/init.d',
                      '/etc/systemd/system', '/etc/periodic/hourly',
-                     '/etc/logrotate.d', '/var/lib/logrotate', '/var/log']:
+                     '/etc/logrotate.d', '/etc/runlevels/default', '/var/lib/logrotate', '/var/log']:
             (self.root / path.lstrip('/')).mkdir(parents=True, exist_ok=True)
             self.code = self.code.replace(path, str(self.root / path.lstrip('/')))
         os_release = self.root / 'os-release'
@@ -28,6 +28,7 @@ class SnellTests(unittest.TestCase):
         self.code = self.code.replace('/etc/os-release', str(os_release))
         self.code = self.code.replace('/run/snell-manager.lock', str(self.root / 'manager.lock'))
         self.code += '\nchown() { printf "%s\\n" "$*" >> "' + str(self.root / 'owners') + '"; }\n'
+        self.code += '\ngetent() { return 0; }\ngroupadd() { return 99; }; addgroup() { return 99; }; useradd() { return 99; }; adduser() { return 99; }\n'
         # Keep download fixtures as shell functions; timeout itself is exercised separately.
         self.code += '\ntimeout() { [ "$1" != -k ] || shift 2; shift; "$@"; }\n'
         self.code += '\neval "$(declare -f snell_listener_pid | sed \'1s/snell_listener_pid/real_snell_listener_pid/\')"\nsnell_listener_pid() { echo 123; }\n'
@@ -228,6 +229,7 @@ show_logs {mode}''')
             self.assertNotIn('UNEXPECTED_READ', result.stdout)
 
     def test_uninstall_removes_only_snell_logging_files(self):
+        (self.root / 'etc/init.d/snell').write_text('service')
         owned = ['etc/snell/logrotate.conf', 'etc/periodic/hourly/snell-logrotate',
                  'var/lib/logrotate/snell.status', 'var/log/snell.log',
                  'var/log/snell.log.1', 'var/log/snell.log.2.gz']
@@ -278,6 +280,8 @@ systemctl() {{ echo '{state}'; }}; stop_snell''', expected=1)
 
     def test_uninstall_stops_transitional_services_before_deleting(self):
         for system in ('debian', 'alpine'):
+            service = self.root / ('etc/init.d/snell' if system == 'alpine' else 'etc/systemd/system/snell.service')
+            service.write_text('service')
             self.binary.write_text('old-core'); self.server_config()
             result = self.run_shell(f'''get_system_type() {{ echo {system}; }}
 ipv6_available() {{ :; }}
@@ -291,6 +295,7 @@ uninstall_snell''')
             self.server.parent.mkdir(parents=True, exist_ok=True)
 
     def test_uninstall_keeps_files_if_stop_fails_or_cannot_be_confirmed(self):
+        (self.root / 'etc/systemd/system/snell.service').write_text('service')
         self.binary.write_text('old-core'); self.server_config()
         for command_result in (0, 1):
             result = self.run_shell(f'''service_action() {{ return {command_result}; }}
@@ -714,7 +719,10 @@ update_snell''', expected=1 if fails else 0)
     def test_repeat_install_preserves_existing_configuration_and_binary(self):
         before = self.prepare_mode_switch('unsafe-raw')
         self.binary.write_text('installed-core')
-        result = self.run_shell('''install_required_packages() { echo UNEXPECTED_CHANGE; }
+        self.binary.chmod(0o755)
+        (self.root / 'etc/systemd/system/snell.service').write_text('service')
+        result = self.run_shell('''snell_service_enabled() { :; }
+install_required_packages() { echo UNEXPECTED_CHANGE; }
 replace_snell_binary() { echo UNEXPECTED_CHANGE; }; restart_snell() { echo UNEXPECTED_CHANGE; }
 install_snell''')
         self.assert_mode_files_unchanged(before)
@@ -855,6 +863,131 @@ snell_service_pid() {{ echo 123; }}
 readlink() {{ echo {loader}; }}
 ss() {{ echo 'LISTEN 0 128 *:40443 *:* users:(("ld-musl",pid=123,fd=4))'; }}
 real_snell_listener_pid''', expected=expected)
+
+    def test_partial_install_can_retry_after_core_download(self):
+        setup = f'''install_required_packages() {{ :; }}; id() {{ :; }}
+replace_snell_binary() {{ echo DOWNLOAD >> '{self.root / 'downloads'}'; printf '#!/bin/sh\\nexit 0\\n' > '{self.binary}'; chmod 755 '{self.binary}'; }}
+systemctl() {{ :; }}; restart_snell() {{ :; }}; show_logs() {{ :; }}
+get_public_ip() {{ echo 203.0.113.1; }}; get_country() {{ echo Test; }}
+'''
+        self.run_shell(setup + 'choose_port() { return 1; }; install_snell', expected=1)
+        self.assertTrue(self.binary.exists())
+        self.assertFalse(self.server.exists())
+        self.run_shell(setup + 'choose_port() { echo 32000; }; install_snell')
+        self.assertIn('32000', self.server.read_text())
+        self.assertTrue(self.client.exists())
+        self.assertEqual((self.root / 'downloads').read_text(), 'DOWNLOAD\n')
+
+    def test_partial_install_preserves_config_and_existing_service(self):
+        for system in ('debian', 'alpine'):
+            for has_service in (False, True):
+                self.prepare_mode_switch('unsafe-raw')
+                self.server.write_text(self.server.read_text() + 'dns = 192.0.2.53\ndns-ip-preference = ipv4-only\n')
+                before = self.server.read_bytes()
+                self.binary.unlink(missing_ok=True)
+                service = self.root / ('etc/init.d/snell' if system == 'alpine' else 'etc/systemd/system/snell.service')
+                service.unlink(missing_ok=True)
+                if has_service:
+                    service.write_text('existing custom service\n')
+                self.run_shell(f'''get_system_type() {{ echo {system}; }}
+check_snell_stopped() {{ :; }}; install_required_packages() {{ :; }}; id() {{ :; }}
+replace_snell_binary() {{ printf '#!/bin/sh\\nexit 0\\n' > '{self.binary}'; chmod 755 '{self.binary}'; }}
+choose_port() {{ echo UNEXPECTED >&2; return 1; }}
+systemctl() {{ :; }}; rc-update() {{ :; }}; restart_snell() {{ :; }}; show_logs() {{ :; }}
+install_snell''')
+                self.assertEqual(self.server.read_bytes(), before)
+                self.assertIn('mode=unsafe-raw', self.client.read_text())
+                self.assertTrue(service.exists())
+                if has_service:
+                    self.assertEqual(service.read_text(), 'existing custom service\n')
+
+    def test_partial_install_reuses_preexisting_group(self):
+        result = self.run_shell('''install_required_packages() { :; }; replace_snell_binary() { :; }
+choose_port() { echo 32000; }; getent() { return 0; }; id() { return 1; }
+useradd() { printf 'CREATE_USER:%s\\n' "$*"; }; systemctl() { :; }
+restart_snell() { :; }; show_logs() { :; }; refresh_client_config() { :; }; install_snell''')
+        self.assertIn('CREATE_USER:-r -g snell', result.stdout)
+
+    def test_partial_install_retries_registration_without_replacing_files(self):
+        before = self.prepare_mode_switch('unsafe-raw')
+        self.binary.write_text('existing-core'); self.binary.chmod(0o755)
+        service = self.root / 'etc/systemd/system/snell.service'
+        service.write_text('existing-service')
+        result = self.run_shell('''snell_service_enabled() { return 1; }
+check_snell_running() { return 1; }; check_snell_stopped() { :; }
+install_required_packages() { :; }; id() { :; }
+replace_snell_binary() { echo UNEXPECTED_DOWNLOAD; return 1; }
+systemctl() { echo SYSTEMCTL:"$1"; }; restart_snell() { echo RESTARTED; }; show_logs() { :; }
+install_snell''')
+        self.assertIn('SYSTEMCTL:enable', result.stdout)
+        self.assertIn('RESTARTED', result.stdout)
+        self.assertNotIn('UNEXPECTED', result.stdout)
+        self.assertEqual(self.server.read_bytes(), before[0])
+        self.assertEqual(self.binary.read_text(), 'existing-core')
+        self.assertEqual(service.read_text(), 'existing-service')
+
+    def test_partial_uninstall_without_service_removes_residual_files(self):
+        for system in ('debian', 'alpine'):
+            self.server.parent.mkdir(parents=True, exist_ok=True)
+            self.server_config(); self.binary.write_text('partial-core')
+            result = self.run_shell(f'''get_system_type() {{ echo {system}; }}
+check_snell_running() {{ return 1; }}; systemctl() {{ [ "$1" = daemon-reload ]; }}
+service_action() {{ echo UNEXPECTED_STOP; return 1; }}
+rc-update() {{ echo UNEXPECTED_DISABLE; return 1; }}
+uninstall_snell''')
+            self.assertNotIn('UNEXPECTED', result.stdout)
+            self.assertFalse(self.binary.exists())
+            self.assertFalse(self.server.parent.exists())
+
+    def test_partial_install_and_uninstall_preserve_live_process_files(self):
+        self.prepare_mode_switch(); self.binary.write_text('partial-core')
+        self.binary.chmod(0o755)
+        before = self.server.read_bytes(), self.binary.read_bytes()
+        for action in ('install_snell', 'uninstall_snell'):
+            self.run_shell('check_snell_running() { return 1; }; snell_process_exists() { return 0; }; ' + action, expected=1)
+            self.assertEqual((self.server.read_bytes(), self.binary.read_bytes()), before)
+
+    def test_config_signals_after_either_rename_restore_both_files(self):
+        for target in (self.server, self.client):
+            for sig, status in [('HUP', 129), ('INT', 130), ('TERM', 143)]:
+                before = self.prepare_mode_switch()
+                marker = self.root / 'signalled'
+                marker.unlink(missing_ok=True)
+                result = self.run_shell(f'''check_snell_installed() {{ :; }}; check_snell_running() {{ :; }}
+eval "$(declare -f write_file | sed '1s/write_file/original_write_file/')"
+write_file() {{
+    original_write_file "$@" || return
+    if [ "$1" = '{target}' ] && [ ! -e '{marker}' ]; then
+        touch '{marker}'; kill -{sig} "$BASHPID"
+    fi
+}}
+restart_snell() {{ :; }}; switch_snell_mode''', '2\n', expected=status)
+                self.assert_mode_files_unchanged(before)
+                self.assertIn('已恢复原配置', result.stderr)
+
+    def test_dns_conflicting_aliases_follow_core_order_and_normalize(self):
+        for lines, current in [
+                ('dns-ip-preference = ipv4-only\nipv-preference = ipv6-only\n', 'ipv6-only'),
+                ('ipv-preference = ipv6-only\ndns-ip-preference = ipv4-only\n', 'ipv4-only')]:
+            self.prepare_mode_switch()
+            self.server.write_text(self.server.read_text() + lines)
+            result = self.run_shell('''check_snell_installed() { :; }; check_snell_running() { return 1; }
+check_snell_stopped() { :; }; switch_snell_dns''', '4\n')
+            self.assertIn('当前 DNS 模式: ' + current, result.stdout)
+            self.assertIn('dns-ip-preference = ipv4-only', self.server.read_text())
+            self.assertNotIn('\nipv-preference', self.server.read_text())
+            self.assertEqual(self.server.read_text().count('dns-ip-preference'), 1)
+
+    def test_menu_marks_supervisor_without_listener_as_abnormal(self):
+        for healthy in (True, False):
+            result = self.run_shell(f'''clear() {{ :; }}; get_system_type() {{ echo alpine; }}
+check_snell_installed() {{ :; }}; rc-service() {{ return 0; }}
+snell_binary_version() {{ echo 'snell-server v6.0.0'; }}
+snell_listener_pid() {{ return {0 if healthy else 1}; }}; show_menu''', '0\n')
+            self.assertIn('已启动' if healthy else '异常（内核进程或监听不可用）', result.stdout)
+            self.assertIn('3. 停止 Snell 服务', result.stdout)
+            if not healthy:
+                self.assertNotIn('已启动', result.stdout)
 
 
 if __name__ == '__main__':
