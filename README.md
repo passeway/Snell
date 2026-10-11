@@ -22,22 +22,40 @@
 
 ## Why Snell v6
 
-> **Deployment-Level Protocol Diversity is the defining change in v6.**<br>
-> Client and server derive framing, padding and packet-size distribution from the PSK. Deployments with different keys present different traffic profiles, so there is no single protocol fingerprint shared by every server, and classifying traffic by one common signature becomes harder.
+> **v6 does not impersonate TLS or any other protocol. It makes every deployment different.**<br>
+> Client and server derive a protocol profile from the PSK. The profile controls observable behavior such as framing, padding, packet-size distribution and traffic normalization. Different PSKs produce different traffic characteristics, so there is no single stable traffic pattern shared by all Snell v6 deployments.
 
 | **42** | **13** | **0** |
 | :---: | :---: | :---: |
-| profile parameters define protocol behavior | shaping strategy categories combine into distinct profiles | low-level parameters to tune by hand: all derived from the PSK |
+| profile parameters | padding and traffic-shaping strategy categories, freely combined | parameters to tune by hand: the profile is derived from the PSK |
 
-### More than a new fingerprint
+### A third approach
+
+| Approach | How it works | Limitation |
+| :--- | :--- | :--- |
+| Pure encryption | Minimize protocol structure and emit a high-entropy random stream | Perfect randomness is itself a recognizable feature |
+| Imitate a common protocol | Make traffic resemble TLS or similar | Has to keep up with the details of the imitated protocol |
+| **Snell v6** | **Deployment-level protocol diversity** | A classifier faces many deployment-specific behaviors instead of one fixed fingerprint |
+
+v4 added controlled random perturbations to the AES stream and worked well for four years, but every deployment shared the same kind of perturbation, which could become a target once studied. v6 turns "one protocol, one pattern" into "one deployment, one pattern".
+
+**Deriving the profile from the PSK** keeps deployment as simple as before, with no low-level parameters to learn, and prevents profile homogenization: nobody copies the same profile, so deployments naturally diverge.
+
+### Snell's long-standing strengths, kept
 
 | Capability | What you get |
 | :--- | :--- |
-| **0-RTT** | PSK authentication cuts connection setup round trips for a faster first packet |
-| **Connection reuse + full TCP semantics** | Reuses connections while preserving behavior such as half-close |
-| **Precise error reporting** | Tells authentication failures from destination failures, so Surge judges node health accurately |
-| **UDP over TCP** | Relays UDP over the TCP connection, so a single TCP port is enough |
-| **Flexible network controls** | DNS address-family preferences and multiple listening addresses |
+| **Performance first** | Latency and throughput have been first-class priorities since v1, close to the practical limits of a proxy protocol |
+| **Single-binary deployment** | One binary with minimal dependencies |
+| **Precise error reporting** | Tells authentication failures from destination timeouts, so Surge, especially Smart policy groups, judges proxy health accurately |
+| **Multiplexing + full TCP state machine** | One of the few protocols with both, so applications that rely on half-close keep working |
+| **0-RTT** | PSK authentication cuts connection setup round trips |
+| **UDP relay** | Carried over TCP, so a single TCP port is enough |
+
+### New network controls in v6
+
+- **`dns-ip-preference`**: address-family preference for DNS results, with five modes: `default`, `prefer-ipv4`, `prefer-ipv6`, `ipv4-only` and `ipv6-only`. Useful on dual-stack, IPv6-preferred or single-stack egress.
+- **Multiple listening addresses**: `listen = 0.0.0.0:PORT,[::]:PORT` listens on IPv4 and IPv6 explicitly, without relying on the system's IPv6 socket compatibility behavior. This installer generates it by default.
 
 ### Three modes for different needs
 
@@ -46,6 +64,20 @@
 | `default` | AES | ✓ | Recommended; the full v6 traffic diversity |
 | `unshaped` | AES | — | Encryption without shaping, less padding overhead |
 | `unsafe-raw` | — | — | Plaintext; only for an intranet or an existing secure tunnel |
+
+<details>
+<summary><strong>Snell version history</strong></summary>
+
+| Version | Main changes |
+| :---: | :--- |
+| v1 | Structured error reporting, single-binary deployment, performance first |
+| v2 | Connection multiplexing with a full TCP state machine |
+| v3 | UDP forwarding |
+| v4 | Controlled random perturbations in the AES stream, avoiding a "perfectly random" signature |
+| v5 | QUIC Proxy Mode (removed in v6: QUIC is hard to proxy well; blocking QUIC so apps fall back to HTTP/2 over TCP works better) |
+| **v6** | **PSK-derived deployment-level protocol diversity**, DNS address-family preference, multiple listening addresses |
+
+</details>
 
 Read [Inside Snell v6](https://nssurge.com/blog/snell-v6/) and the [official release notes](https://kb.nssurge.com/surge-knowledge-base/release-notes/snell) for the design details.
 
@@ -70,7 +102,7 @@ bash -c 'bash <(curl -fsSL https://snell-ten.vercel.app)'
 
 Installation sets up dependencies, a random port, a 48-character random PSK and the system service, then prints a ready-to-use Surge proxy entry. Run the same command again to open the management menu.
 
-> The installer currently uses the official **v6.0.0rc2** test release with `mode=default`. Your client must support Snell v6 and use the same `mode` as the server.
+> The installer currently uses the official **v6.0.0rc2** test release with `mode=default`. Your client must support Snell v6 and use the same `mode` as the server. During the beta, the protocol may change incompatibly, so keep both client and server up to date (update the server with option **4**).
 
 > CentOS support covers the maintained **CentOS Stream 9 / 10** (RHEL-compatible systems such as Rocky and AlmaLinux also install with `dnf`, and **Rocky Linux 8** is verified in CI); CentOS 7 (no `dnf`) is not supported, and end-of-life CentOS 8 is not recommended because its official repositories are offline. With firewalld enabled, allow the port with `firewall-cmd --permanent --add-port=PORT/tcp && firewall-cmd --reload`.
 
