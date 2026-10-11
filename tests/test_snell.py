@@ -122,6 +122,32 @@ replace_snell_binary() { echo UNEXPECTED_REPLACE; }; update_snell''', expected=1
         self.assertIn('3. 启动 Snell 服务', result.stdout)
         self.assertNotIn('异常', result.stdout)
 
+    def test_restore_write_ignores_repeated_hangup(self):
+        target = self.root / 'etc/snell/restored'
+        self.run_shell(f'''chmod() {{ kill -HUP $BASHPID; command chmod "$@"; }}
+trap '' HUP INT TERM; write_file '{target}' 600 root:root <<< restored''')
+        self.assertEqual(target.read_text(), 'restored\n')
+
+    def test_restore_reports_service_broken_before_change(self):
+        before = self.prepare_mode_switch()
+        result = self.run_shell('''check_snell_installed() { :; }; check_snell_running() { :; }
+snell_listener_pid() { return 1; }; restart_snell() { return 1; }; switch_snell_mode''', '2\n', expected=1)
+        self.assert_mode_files_unchanged(before)
+        self.assertIn('服务在修改前已异常', result.stderr)
+        self.assertNotIn('自动恢复未完成', result.stderr)
+
+    def test_start_requires_service_file_and_config(self):
+        self.server_config()
+        result = self.run_shell('service_action() { echo UNEXPECTED_START; }; start_snell', expected=1)
+        self.assertNotIn('UNEXPECTED', result.stdout)
+        self.assertIn('通过菜单 1 补全安装', result.stderr)
+
+    def test_uninstall_without_installation_is_a_no_op(self):
+        self.server.parent.rmdir()
+        result = self.run_shell('check_snell_running() { return 1; }; snell_process_exists() { return 1; }; uninstall_snell')
+        self.assertIn('未安装，无需卸载', result.stdout)
+        self.assertNotIn('卸载成功', result.stdout)
+
     def test_systemd_unit_stops_retrying_after_repeated_failures(self):
         self.run_shell('write_systemd_service')
         unit = (self.root / 'etc/systemd/system/snell.service').read_text()
@@ -502,6 +528,7 @@ show_logs {mode}''')
             self.assertEqual((self.root / name).read_text(), 'keep-until-stopped', name)
 
     def test_start_and_stop_command_failures_return_nonzero(self):
+        self.server.parent.mkdir(parents=True, exist_ok=True); self.server_config(); self.service_files()
         for operation in ('start_snell', 'restart_snell', 'stop_snell'):
             result = self.run_shell('service_action() { return 1; }; show_logs() { echo FAILURE_LOG; }; ' + operation, expected=1)
             self.assertNotIn('成功', result.stdout)
@@ -515,6 +542,7 @@ start_snell''', expected=1)
         self.assertNotIn('启动成功', result.stdout)
 
     def test_start_allows_delayed_start_and_requires_stable_status(self):
+        self.server.parent.mkdir(parents=True, exist_ok=True); self.server_config(); self.service_files()
         result = self.run_shell('''service_action() { :; }; sleep() { :; }
 checks=0
 check_snell_running() { checks=$((checks+1)); printf 'checks=%s\\n' "$checks"; [ "$checks" -ge 3 ]; }
@@ -883,6 +911,7 @@ change_snell_config() { echo CONFIG_MENU_CALLED; }; main''', '9\n\n0\n')
         self.assertIn('CONFIG_MENU_CALLED', result.stdout)
 
     def test_mode_switch_all_modes_on_both_service_managers(self):
+        self.server.parent.mkdir(parents=True, exist_ok=True); self.server_config(); self.service_files()
         for system in ('debian', 'ubuntu', 'alpine'):
             for running in (False, True):
                 for selection, mode in [('1', 'default'), ('2', 'unshaped'), ('3', 'unsafe-raw')]:
