@@ -127,7 +127,7 @@ write_file() (
     local destination="$1" permissions="$2" owner="$3" temporary
     temporary=$(mktemp "${destination}.tmp.XXXXXX") || return 1
     trap 'rm -f "$temporary"' EXIT
-    # 恢复原配置期间保持忽略信号，避免恢复写入被再次到来的挂断信号打断。
+    # 恢复原配置期间保持忽略信号，避免恢复写入被再次到来的 HUP/INT/TERM 打断。
     [ -n "${SNELL_RESTORING:-}" ] || trap 'exit 1' HUP INT TERM
     if ! { cat > "$temporary" &&
         chown "$owner" "$temporary" &&
@@ -816,7 +816,7 @@ service_action() (
     if [ "$(get_system_type)" = alpine ]; then
         rc-service snell "$1"
     else
-        # 手动启停同样计入启动频率限制：每次手动启动前清零计数和失败状态，
+        # 手动启动同样计入启动频率限制：每次手动启动或重启前清零计数和失败状态，
         # 只让服务自身的反复崩溃受限。未加载的服务执行 reset-failed 会报错，因此跳过。
         case "$1" in
             start|restart)
@@ -952,8 +952,8 @@ check_snell_running() {
 check_snell_stopped() {
     local state result
     if [ "$(get_system_type)" = alpine ]; then
-        # 服务脚本不存在时 rc-service 返回 1；仍有 Snell 进程时不能视为已停止。
-        if [ ! -f /etc/init.d/snell ]; then ! snell_process_exists; return; fi
+        # 服务脚本不存在时 rc-service 返回 1，此时没有由 OpenRC 管理的服务。
+        [ -f /etc/init.d/snell ] || return 0
         if rc-service snell status >/dev/null 2>&1; then result=0; else result=$?; fi
         # OpenRC 的 3 表示 stopped；4/8/16/32 等状态不能据此确认停机。
         [ "$result" -eq 3 ]
@@ -963,7 +963,7 @@ check_snell_stopped() {
     fi
 }
 
-# 服务管理器明确报告正在启动、停止或反复重启；查询失败不算。
+# 服务管理器明确报告正在启动、停止、重载或崩溃后重启（OpenRC 还包括 inactive/crashed）；查询失败不算。
 snell_service_transitioning() {
     local result
     if [ "$(get_system_type)" = alpine ]; then
@@ -1232,7 +1232,7 @@ _update_snell() {
     replace_snell_binary || return 1
     # 服务文件随更新刷新，已安装的主机也能获得新的重启策略。
     if [ "$(get_system_type)" = alpine ]; then
-        write_openrc_service || return 1
+        write_openrc_service || { fail "新内核已替换，但服务文件更新失败，服务尚未重启"; return 1; }
     else
         write_systemd_service && systemctl daemon-reload || {
             fail "新内核已替换，但服务文件更新失败，服务尚未重启"; return 1;
@@ -1289,9 +1289,13 @@ _uninstall_snell() {
     else
         if (( has_service )); then systemctl disable snell || return 1; fi
         rm -f /etc/systemd/system/multi-user.target.wants/snell.service || return 1
-        rm -f /etc/systemd/system/snell.service && systemctl daemon-reload || return 1
-        # 失败状态的服务在单元文件删除后仍会残留，清除后系统不再显示 degraded。
-        systemctl reset-failed snell.service 2>/dev/null || true
+        rm -f /etc/systemd/system/snell.service || return 1
+        # 未发现安装时只清理残留文件；systemd 未运行（容器、chroot）时 daemon-reload 会失败。
+        if (( found )); then
+            systemctl daemon-reload || return 1
+            # 失败状态的服务在单元文件删除后仍会残留，清除后系统不再显示 degraded。
+            systemctl reset-failed snell.service 2>/dev/null || true
+        fi
     fi
     rm -f /usr/local/bin/snell-server && rm -rf /etc/snell || { fail "清理 Snell 文件失败"; return 1; }
     if (( found )); then
@@ -1307,7 +1311,7 @@ show_menu() {
     snell_installed=$?
     check_snell_running
     snell_running=$?
-    # 正在启动或反复重启的服务同样提供停止选项。
+    # 正在启动、停止、反复重启或已崩溃（OpenRC）的服务同样提供停止选项。
     if [ $snell_installed -eq 0 ] && [ $snell_running -ne 0 ] && snell_service_transitioning; then
         snell_running=0
     fi
