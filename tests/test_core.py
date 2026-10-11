@@ -245,7 +245,9 @@ class CoreTests(unittest.TestCase):
                 config = config.replace('${LISTEN_ADDRESS}', listen)
                 if dns_server:
                     config += f'\ndns = {dns_server.address}\n'
-                    config = config.replace('dns-ip-preference = default', 'dns-ip-preference = ipv4-only')
+                    # 预置值须与菜单选择不同，确保测试走真实写入。
+                    seeded = 'prefer-ipv6' if dns[1] == 'ipv4-only' else 'ipv4-only'
+                    config = config.replace('dns-ip-preference = default', 'dns-ip-preference = ' + seeded)
                     if dns_alias_conflict:
                         config += ('ipv-preference = default\n  ipv6-only\n' if dns_alias_conflict == 'continued'
                                    else 'ipv-preference = ipv6-only\n')

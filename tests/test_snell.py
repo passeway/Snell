@@ -753,6 +753,15 @@ replace_snell_binary() { echo UNEXPECTED_REPLACE; }; update_snell''', expected=1
         self.assertIn('listen = 0.0.0.0:50000\n', self.server.read_text())
         self.assertIn('多个端口将合并为 50000', result.stdout)
 
+    def test_port_change_without_ipv6_reports_removed_ipv6_listener(self):
+        self.prepare_mode_switch()
+        result = self.run_shell(
+            'check_snell_installed() { :; }; check_snell_running() { return 1; }; ipv6_available() { return 1; }\n'
+            'check_snell_stopped() { :; }; ss() { :; }; change_snell_port', '50000\n')
+        self.assertIn('listen = 0.0.0.0:50000\n', self.server.read_text())
+        self.assertIn('将移除 IPv6 监听', result.stdout)
+        self.assertNotIn('合并', result.stdout)
+
     def test_public_ipv6_uses_stable_address_on_default_route_interface(self):
         def ip(route, addrs):
             # get_public_ipv6 runs: ip -6 route show default / ip -6 -o addr show dev IF scope global
@@ -927,7 +936,8 @@ fetch_text() { return 1; }; switch_snell_mode''', '2\n\n', expected=1)
         self.assertEqual(self.server.read_bytes(), before)
         self.assertFalse(self.client.exists())
         self.assertIn('模式未修改，服务端配置保持不变', result.stderr)
-        self.assertNotIn('服务已安装', result.stderr)
+        self.assertNotIn('已保存为', result.stdout)
+        self.assertNotIn('已更改为', result.stdout)
 
     def test_mode_switch_write_failure_preserves_both_configs(self):
         for destination in (self.server, self.client):
@@ -956,7 +966,7 @@ switch_snell_mode''', '2\n', expected=1)
                 self.assertFalse(self.client.exists())
             self.assertIn('RESTART_MODE:unshaped\nRESTART_MODE:default', result.stdout)
             self.assertIn('已恢复原配置', result.stderr)
-            self.assertNotIn('模式已切换', result.stdout)
+            self.assertNotIn('已更改为', result.stdout)
 
     def test_mode_switch_failed_recovery_is_reported(self):
         before = self.prepare_mode_switch()
@@ -964,7 +974,7 @@ switch_snell_mode''', '2\n', expected=1)
 restart_snell() { return 1; }; switch_snell_mode''', '2\n', expected=1)
         self.assert_mode_files_unchanged(before)
         self.assertIn('自动恢复未完成', result.stderr)
-        self.assertNotIn('模式已切换', result.stdout)
+        self.assertNotIn('已更改为', result.stdout)
 
     def test_mode_switch_interruption_restores_previous_mode(self):
         before = self.prepare_mode_switch()

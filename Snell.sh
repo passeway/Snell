@@ -669,7 +669,9 @@ _change_snell_port() {
         fi
     done
     IFS=, read -r -a old_endpoints <<< "${listen//[[:space:]]/}"
-    if (( ${#endpoints[@]} < ${#old_endpoints[@]} )); then
+    if [[ "${listen//[[:space:]]/}" == *"["* && "$new_listen" != *"["* ]]; then
+        echo -e "${YELLOW}未检测到可用 IPv6，将移除 IPv6 监听，客户端条目不再包含 IPv6 节点${RESET}"
+    elif (( ${#endpoints[@]} < ${#old_endpoints[@]} )); then
         echo -e "${YELLOW}同一地址原有的多个端口将合并为 ${port}；如需保留多个端口，请手动编辑服务端配置${RESET}"
     fi
     apply_snell_setting listen "$new_listen" "监听地址" || return 1
@@ -1111,6 +1113,7 @@ AmbientCapabilities=CAP_NET_BIND_SERVICE CAP_NET_ADMIN CAP_NET_RAW
 CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_NET_ADMIN CAP_NET_RAW
 LimitNOFILE=32768
 Restart=on-failure
+RestartSec=3
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=snell-server
@@ -1337,7 +1340,11 @@ main() {
                 update_snell
                 ;;
             5)
-                restart_snell
+                if [ $snell_installed -eq 0 ]; then
+                    restart_snell
+                else
+                    echo -e "${RED}Snell 尚未安装${RESET}"
+                fi
                 ;;
             6)
                 if [ "$(get_system_type)" = alpine ]; then
