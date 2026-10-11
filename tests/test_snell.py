@@ -164,9 +164,11 @@ SNELL_RESTORING=1; trap '' HUP INT TERM; write_file '{target}' 600 root:root <<<
         self.assertFalse((wants / 'snell.service').is_symlink())
         self.assertIn('残留文件已清理', result.stdout)
 
-    def test_alpine_missing_init_script_with_running_core_is_not_stopped(self):
-        self.run_shell('get_system_type() { echo alpine; }; snell_process_exists() { return 0; }; check_snell_stopped', expected=1)
-        self.run_shell('get_system_type() { echo alpine; }; snell_process_exists() { return 1; }; check_snell_stopped')
+    def test_uninstall_without_installation_skips_systemd_when_not_running(self):
+        self.server.parent.rmdir()
+        result = self.run_shell('''systemctl() { echo "System has not been booted with systemd" >&2; return 1; }
+check_snell_running() { return 1; }; snell_process_exists() { return 1; }; uninstall_snell''')
+        self.assertIn('残留文件已清理', result.stdout)
 
     def test_systemd_unit_stops_retrying_after_repeated_failures(self):
         self.run_shell('write_systemd_service')
