@@ -604,6 +604,29 @@ replace_snell_binary() { echo UNEXPECTED_REPLACE; }; update_snell''', expected=1
                 self.run_shell(setup + '; refresh_client_config')
                 self.assertEqual(len(self.client.read_text().splitlines()), 1)
 
+    def test_export_keeps_custom_ipv6_label(self):
+        self.server_config()
+        for second, want in [
+                ('东京 IPv6 = snell, 2001:db8::9, 40443, psk=old', '东京 IPv6'),
+                ('东京 = snell, 2001:db8::9, 40443, psk=old', '东京-v6'),
+                (' = snell, 2001:db8::9, 40443, psk=old', '东京-v6'),
+                (None, '东京-v6')]:
+            with self.subTest(second=second):
+                self.client.write_text('东京 = snell, 203.0.113.1, 40443, psk=old\n' +
+                                       (second + '\n' if second else ''))
+                lines = self.run_shell('get_public_ipv6() { echo 2001:db8::1; }; refresh_client_config').stdout.splitlines()
+                self.assertTrue(lines[0].startswith('东京 = snell, 203.0.113.1, 40443,'), lines)
+                self.assertTrue(lines[1].startswith(want + ' = snell, 2001:db8::1, 40443,'), lines)
+
+    def test_export_normalizes_leading_zero_ports(self):
+        self.server_config()
+        self.server.write_text(self.server.read_text().replace('[::]:40443,0.0.0.0:40443', '0.0.0.0:0443'))
+        self.client.write_text('HK = snell, 203.0.113.1, 443, psk=old\n')
+        result = self.run_shell('refresh_client_config')
+        self.assertIn('HK = snell, 203.0.113.1, 443, ', result.stdout)
+        # The same port written with and without a leading zero is not ambiguous.
+        self.assertEqual(self.run_shell("client_ipv4_port '192.0.2.1:0443,192.0.2.2:443' 203.0.113.1").stdout.strip(), '443')
+
     def test_openrc_service_discards_stdout_and_stderr(self):
         self.run_shell('write_openrc_service')
         service = self.root / 'etc/init.d/snell'

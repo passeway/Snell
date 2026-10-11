@@ -294,7 +294,7 @@ surge_value() {
 }
 
 render_client_config() {
-    local LC_ALL=C listen port psk mode server_config endpoint address="" label=""
+    local LC_ALL=C listen port psk mode server_config endpoint address="" label="" label6=""
     local -a endpoints
     [ -f /etc/snell/snell-server.conf ] || { fail "服务端配置不存在"; return 1; }
     if [ "$#" -gt 0 ]; then server_config="$1"; else
@@ -318,6 +318,11 @@ render_client_config() {
     if [ -f /etc/snell/snell-client.conf ]; then
         address=$(awk -F, 'NR==1 { gsub(/[[:space:]]/, "", $2); print $2 }' /etc/snell/snell-client.conf)
         label=$(awk -F= 'NR==1 { gsub(/^[[:space:]]+|[[:space:]]+$/, "", $1); print $1 }' /etc/snell/snell-client.conf)
+        # IPv6 节点按地址中的冒号识别，沿用其节点名。
+        label6=$(awk -F, 'NR > 1 {
+            address=$2; gsub(/[[:space:]]/, "", address)
+            if (address ~ /:/) { name=$1; sub(/=.*$/, "", name); gsub(/^[[:space:]]+|[[:space:]]+$/, "", name); print name; exit }
+        }' /etc/snell/snell-client.conf)
     fi
     if ! valid_ipv4 "$address"; then
         address=$(get_public_ip) || { fail "服务已安装，但客户端地址未填写；可通过菜单 8 重试"; return 1; }
@@ -328,10 +333,14 @@ render_client_config() {
     fi
     printf '%s = snell, %s, %s, psk=%s, version=6, mode=%s, reuse=true\n' \
         "$label" "$address" "$port" "$(surge_value "$psk")" "$mode"
-    # 服务器有公网 IPv6 且服务监听 IPv6 时，额外导出一条 IPv6 节点。
+    # 服务器有公网 IPv6 且服务监听 IPv6 时，额外导出一条 IPv6 节点；
+    # 已有的 IPv6 节点名保留，缺失、无效或与 IPv4 节点重名时使用默认名。
     if address=$(get_public_ipv6) && port=$(client_ipv6_port "$listen" "$address"); then
-        printf '%s-v6 = snell, %s, %s, psk=%s, version=6, mode=%s, reuse=true\n' \
-            "$label" "$address" "$port" "$(surge_value "$psk")" "$mode"
+        if [ -z "$label6" ] || [ "$label6" = "$label" ] || [[ "$label6" == *,* ]]; then
+            label6="${label}-v6"
+        fi
+        printf '%s = snell, %s, %s, psk=%s, version=6, mode=%s, reuse=true\n' \
+            "$label6" "$address" "$port" "$(surge_value "$psk")" "$mode"
     fi
 }
 
@@ -358,6 +367,7 @@ client_ipv4_port() {
         [[ "$endpoint" == *:* ]] || { fail "监听地址格式无效"; return 1; }
         host=${endpoint%:*}; port=${endpoint##*:}
         valid_port "$port" || { fail "服务端端口无效"; return 1; }
+        port=$((10#$port))
         [[ "$host" != *:* ]] || continue
         [ "$host" != "$address" ] || exact=${exact:-$port}
         [ "$host" != 0.0.0.0 ] || wildcard=${wildcard:-$port}
