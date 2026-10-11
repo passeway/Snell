@@ -4,7 +4,8 @@
 
 ### One key. A distinct traffic profile.
 
-Deploy the Surge team's Snell v6 proxy protocol on Debian, Ubuntu, CentOS and Alpine with a single command.
+**Snell** is a lightweight encrypted proxy protocol designed by the Surge team.<br>
+**v6** introduces deployment-level protocol diversity: every deployment derives its own traffic profile from its PSK.
 
 ![Snell](https://img.shields.io/badge/Snell-v6-635BFF?style=flat-square)
 ![Linux](https://img.shields.io/badge/Linux-Debian%20%7C%20Ubuntu%20%7C%20CentOS%20%7C%20Alpine-18181B?style=flat-square)
@@ -13,9 +14,40 @@ Deploy the Surge team's Snell v6 proxy protocol on Debian, Ubuntu, CentOS and Al
 
 **English** · [简体中文](README_zh.md)
 
-[Quick start](#quick-start) · [Connect with Surge](#connect-with-surge) · [Management menu](#management-menu) · [Configuration](#configuration) · [Advanced](#advanced)
+[Why v6](#why-snell-v6) · [Quick start](#quick-start) · [Connect with Surge](#connect-with-surge) · [Management menu](#management-menu) · [Configuration](#configuration) · [Advanced](#advanced)
 
 </div>
+
+---
+
+## Why Snell v6
+
+> **Deployment-Level Protocol Diversity is the defining change in v6.**<br>
+> Client and server derive framing, padding and packet-size distribution from the PSK. Deployments with different keys present different traffic profiles, so there is no single protocol fingerprint shared by every server, and classifying traffic by one common signature becomes harder.
+
+| **42** | **13** | **0** |
+| :---: | :---: | :---: |
+| profile parameters define protocol behavior | shaping strategy categories combine into distinct profiles | low-level parameters to tune by hand: all derived from the PSK |
+
+### More than a new fingerprint
+
+| Capability | What you get |
+| :--- | :--- |
+| **0-RTT** | PSK authentication cuts connection setup round trips for a faster first packet |
+| **Connection reuse + full TCP semantics** | Reuses connections while preserving behavior such as half-close |
+| **Precise error reporting** | Tells authentication failures from destination failures, so Surge judges node health accurately |
+| **UDP over TCP** | Relays UDP over the TCP connection, so a single TCP port is enough |
+| **Flexible network controls** | DNS address-family preferences and multiple listening addresses |
+
+### Three modes for different needs
+
+| Mode | Encryption | Shaping | Use it for |
+| :--- | :---: | :---: | :--- |
+| `default` | AES | ✓ | Recommended; the full v6 traffic diversity |
+| `unshaped` | AES | — | Encryption without shaping, less padding overhead |
+| `unsafe-raw` | — | — | Plaintext; only for an intranet or an existing secure tunnel |
+
+Read [Inside Snell v6](https://nssurge.com/blog/snell-v6/) and the [official release notes](https://kb.nssurge.com/surge-knowledge-base/release-notes/snell) for the design details.
 
 ---
 
@@ -36,33 +68,13 @@ bash -c 'bash <(curl -fsSL https://snell-ten.vercel.app)'
 
 **① Choose `1` to install → ② Allow the printed TCP port in your security group and firewall → ③ Import the proxy entry into Surge**
 
-> CentOS support covers the maintained **CentOS Stream 9 / 10** (RHEL-compatible systems such as Rocky and AlmaLinux also install with `dnf`, and **Rocky Linux 8** is verified in CI); CentOS 7 (no `dnf`) is not supported, and end-of-life CentOS 8 is not recommended because its official repositories are offline. With firewalld enabled, allow the port with `firewall-cmd --permanent --add-port=PORT/tcp && firewall-cmd --reload`.
-
 Installation sets up dependencies, a random port, a 48-character random PSK and the system service, then prints a ready-to-use Surge proxy entry. Run the same command again to open the management menu.
 
-> The installer currently uses the official **v6.0.0rc2** test release with `mode=default` (AES encryption and traffic shaping). Your client must support Snell v6 and use the same `mode` as the server.
+> The installer currently uses the official **v6.0.0rc2** test release with `mode=default`. Your client must support Snell v6 and use the same `mode` as the server.
 
----
+> CentOS support covers the maintained **CentOS Stream 9 / 10** (RHEL-compatible systems such as Rocky and AlmaLinux also install with `dnf`, and **Rocky Linux 8** is verified in CI); CentOS 7 (no `dnf`) is not supported, and end-of-life CentOS 8 is not recommended because its official repositories are offline. With firewalld enabled, allow the port with `firewall-cmd --permanent --add-port=PORT/tcp && firewall-cmd --reload`.
 
-## Why Snell v6
-
-**Deployment-level protocol diversity is the defining change in v6.** Client and server derive framing, padding and packet-size behavior from the PSK, so deployments with different keys present different traffic profiles, making classification by a shared fingerprint harder.
-
-| 42 profile parameters | 13 shaping strategy categories | Derived from your PSK |
-| :---: | :---: | :---: |
-| Define protocol behavior | Combine into distinct profiles | No manual tuning |
-
-| Capability | Practical value |
-| :--- | :--- |
-| **0-RTT** | PSK authentication cuts connection setup round trips |
-| **Connection reuse and full TCP semantics** | Preserves behavior such as half-close for application compatibility |
-| **Precise error reporting** | Helps Surge tell authentication problems from destination failures |
-| **UDP over TCP** | Relays UDP over the TCP connection, so a single TCP port is enough |
-| **Flexible network controls** | DNS address-family preferences and multiple listening addresses |
-
-Read [Inside Snell v6](https://nssurge.com/blog/snell-v6/) and the [official release notes](https://kb.nssurge.com/surge-knowledge-base/release-notes/snell) for the design details.
-
-## What the installer does
+### What the installer does
 
 - **Several systems, one experience**: systemd on Debian / Ubuntu / CentOS, OpenRC on Alpine, on AMD64 and ARM64.
 - **Automatic dual stack**: listens on `0.0.0.0:PORT,[::]:PORT` when IPv6 is available and exports an extra IPv6 entry when a public IPv6 address is found.
@@ -127,11 +139,7 @@ Enter a new port in `1–65535`. The script checks that the TCP port is free and
 
 ### Proxy mode · `9 → 2`
 
-| Option | Mode | Behavior |
-| :---: | :--- | :--- |
-| `1` | `default` | AES encryption with traffic shaping; the default |
-| `2` | `unshaped` | AES encryption without traffic shaping |
-| `3` | `unsafe-raw` | Plaintext; only for an intranet or an existing secure tunnel |
+Options `1` `default`, `2` `unshaped` and `3` `unsafe-raw`; see [Three modes](#three-modes-for-different-needs) for the differences.
 
 **Copy the new entry to Surge after switching**: client and server must use the same `mode`.
 

@@ -4,7 +4,8 @@
 
 ### 一份密钥，一种流量特征
 
-在 Debian、Ubuntu、CentOS 与 Alpine 上，一条命令部署 Surge 团队的 Snell v6 代理协议。
+**Snell** 是 Surge 团队设计的轻量加密代理协议。<br>
+**v6** 引入部署级协议多样性：每个部署由自己的 PSK 派生独有的流量特征。
 
 ![Snell](https://img.shields.io/badge/Snell-v6-635BFF?style=flat-square)
 ![Linux](https://img.shields.io/badge/Linux-Debian%20%7C%20Ubuntu%20%7C%20CentOS%20%7C%20Alpine-18181B?style=flat-square)
@@ -13,9 +14,40 @@
 
 [English](README.md) · **简体中文**
 
-[快速开始](#快速开始) · [接入 Surge](#接入-surge) · [管理菜单](#管理菜单) · [调整配置](#调整配置) · [进阶说明](#进阶说明)
+[v6 的优势](#snell-v6-的优势) · [快速开始](#快速开始) · [接入 Surge](#接入-surge) · [管理菜单](#管理菜单) · [调整配置](#调整配置) · [进阶说明](#进阶说明)
 
 </div>
+
+---
+
+## Snell v6 的优势
+
+> **部署级协议多样性（Deployment-Level Protocol Diversity）是 v6 的核心升级。**<br>
+> 客户端与服务端根据 PSK 自动派生分帧、填充与包长分布。不同 PSK 的部署呈现不同的流量特征，没有一个所有节点共用的协议指纹，依靠统一特征进行分类的成本随之提高。
+
+| **42** | **13** | **0** |
+| :---: | :---: | :---: |
+| 个特征参数描述协议行为 | 类填充与流量整形策略组合出不同特征 | 个需要手动调节的底层参数，全部由 PSK 派生 |
+
+### 不只是换了一种特征
+
+| 能力 | 带来什么 |
+| :--- | :--- |
+| **0-RTT** | 预共享密钥认证，减少建立代理连接所需的往返，首包更快 |
+| **连接复用 + 完整 TCP 语义** | 复用连接的同时保留半关闭等行为，兼顾效率与应用兼容性 |
+| **准确的错误反馈** | 区分认证失败与目标连接失败，Surge 能更准确地判断节点状态 |
+| **UDP over TCP** | UDP 转发由 TCP 承载，只需放行一个 TCP 端口 |
+| **灵活的网络控制** | DNS 地址族偏好与多地址监听，适配不同出口环境 |
+
+### 三种模式，按场景取舍
+
+| 模式 | 加密 | 流量整形 | 适用场景 |
+| :--- | :---: | :---: | :--- |
+| `default` | AES | ✓ | 默认推荐，完整发挥 v6 的流量特征多样性 |
+| `unshaped` | AES | — | 保留加密、关闭整形，减少填充带来的额外流量 |
+| `unsafe-raw` | — | — | 明文传输，仅适合内网或已有安全隧道的环境 |
+
+设计细节见 [Snell v6 技术介绍](https://nssurge.com/blog/snell-v6/) 与 [官方发布说明](https://kb.nssurge.com/surge-knowledge-base/release-notes/snell)。
 
 ---
 
@@ -36,33 +68,13 @@ bash -c 'bash <(curl -fsSL https://snell-ten.vercel.app)'
 
 **① 选择 `1` 安装 → ② 在云安全组和防火墙放行输出的 TCP 端口 → ③ 将代理条目导入 Surge**
 
-> CentOS 支持仍在维护的 **CentOS Stream 9 / 10**（Rocky、AlmaLinux 等 RHEL 兼容系统同样使用 `dnf` 安装，**Rocky Linux 8** 已在 CI 中验证）；不带 `dnf` 的 CentOS 7 不受支持；CentOS 8 已停止维护、官方软件源已下线，不建议使用。启用了 firewalld 时，放行端口可执行 `firewall-cmd --permanent --add-port=端口/tcp && firewall-cmd --reload`。
-
 安装会自动完成依赖、随机端口、48 位随机 PSK 与服务注册，并在最后输出可直接使用的 Surge 代理条目。再次运行同一命令即可打开管理菜单。
 
-> 当前安装官方 **v6.0.0rc2** 测试版本，默认 `mode=default`（AES 加密与流量整形）。客户端需支持 Snell v6，且 `mode` 与服务端一致。
+> 当前安装官方 **v6.0.0rc2** 测试版本，默认 `mode=default`。客户端需支持 Snell v6，且 `mode` 与服务端一致。
 
----
+> CentOS 支持仍在维护的 **CentOS Stream 9 / 10**（Rocky、AlmaLinux 等 RHEL 兼容系统同样使用 `dnf` 安装，**Rocky Linux 8** 已在 CI 中验证）；不带 `dnf` 的 CentOS 7 不受支持；CentOS 8 已停止维护、官方软件源已下线，不建议使用。启用了 firewalld 时，放行端口可执行 `firewall-cmd --permanent --add-port=端口/tcp && firewall-cmd --reload`。
 
-## 为什么是 Snell v6
-
-**部署级协议多样性是 v6 的核心升级。** 客户端与服务端根据 PSK 自动派生分帧、填充与包长分布，不同 PSK 的部署呈现不同的流量特征，提高依靠统一协议指纹进行分类的成本。
-
-| 42 个特征参数 | 13 类填充与流量整形策略 | 由 PSK 自动派生 |
-| :---: | :---: | :---: |
-| 描述协议行为 | 组合出不同流量特征 | 无需手动调节底层参数 |
-
-| 能力 | 实际价值 |
-| :--- | :--- |
-| **0-RTT** | 预共享密钥认证，减少建立代理连接所需的往返 |
-| **连接复用与完整 TCP 语义** | 保留半关闭等行为，兼顾复用与应用兼容性 |
-| **准确的错误反馈** | 区分认证失败与目标连接失败，帮助 Surge 判断节点状态 |
-| **UDP over TCP** | 通过 TCP 承载 UDP 转发，只需放行一个 TCP 端口 |
-| **灵活的网络控制** | DNS 地址族偏好与多地址监听，适配不同出口环境 |
-
-设计细节见 [Snell v6 技术介绍](https://nssurge.com/blog/snell-v6/) 与 [官方发布说明](https://kb.nssurge.com/surge-knowledge-base/release-notes/snell)。
-
-## 这个脚本做了什么
+### 这个脚本做了什么
 
 - **多系统，一致体验**：Debian / Ubuntu / CentOS 使用 systemd，Alpine 使用 OpenRC，支持 AMD64 与 ARM64。
 - **自动双栈**：检测到 IPv6 时监听 `0.0.0.0:端口,[::]:端口`，找到公网 IPv6 地址时额外导出 IPv6 节点。
@@ -127,11 +139,7 @@ My-Snell = snell, YOUR_SERVER_IP, YOUR_PORT, psk=YOUR_PSK, version=6, mode=defau
 
 ### 代理模式 · `9 → 2`
 
-| 选项 | 模式 | 特点 |
-| :---: | :--- | :--- |
-| `1` | `default` | AES 加密与流量整形，默认选择 |
-| `2` | `unshaped` | 保留 AES 加密，关闭流量整形 |
-| `3` | `unsafe-raw` | 明文传输，仅适合内网或已有安全隧道的环境 |
+选项 `1` `default`、`2` `unshaped`、`3` `unsafe-raw`，区别见 [三种模式](#三种模式按场景取舍)。
 
 **切换后请把新条目同步到 Surge**：客户端与服务端的 `mode` 必须一致。
 
