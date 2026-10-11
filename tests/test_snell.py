@@ -43,6 +43,8 @@ class SnellTests(unittest.TestCase):
         self.code += '\napt-get() { return 99; }; apk() { return 99; }\n'
         # The host's own addresses must not leak into exports; IPv6 tests provide fixtures.
         self.code += '\nip() { return 1; }\n'
+        # Host service managers must never be queried or changed by offline tests.
+        self.code += '\nsystemctl() { return 99; }; rc-service() { return 99; }; rc-update() { return 99; }; journalctl() { return 99; }\n'
         # Keep download fixtures as shell functions; timeout itself is exercised separately.
         self.code += '\ntimeout() { [ "$1" != -k ] || shift 2; shift; "$@"; }\n'
         self.code += '\neval "$(declare -f snell_listener_pid | sed \'1s/snell_listener_pid/real_snell_listener_pid/\')"\nsnell_listener_pid() { echo 123; }\n'
@@ -563,30 +565,6 @@ replace_snell_binary() { echo UNEXPECTED_REPLACE; }; update_snell''', expected=1
         self.assertIn('203.0.113.10', result.stdout)
         self.assertNotIn('127.0.0.1', result.stdout)
 
-    def test_public_ipv6_uses_stable_global_interface_address(self):
-        addresses = (
-            '2: eth0    inet6 2001:db8::aaaa/64 scope global temporary dynamic \\\\       valid_lft 1sec\\n'
-            '2: eth0    inet6 fd00::1/64 scope global \\\\       valid_lft forever\\n'
-            '2: eth0    inet6 2001:DB8::1/64 scope global dynamic mngtmpaddr \\\\       valid_lft 1sec\\n')
-        result = self.run_shell(f"ipv6_available() {{ :; }}; ip() {{ printf '{addresses}'; }}; get_public_ipv6")
-        self.assertEqual(result.stdout.strip(), '2001:db8::1')
-        # Only ULA, temporary or no global addresses, or a disabled stack, export nothing.
-        self.run_shell("ipv6_available() { :; }; ip() { printf '2: eth0    inet6 fd00::1/64 scope global \\n'; }; "
-                       "get_public_ipv6", expected=1)
-        self.run_shell('ipv6_available() { :; }; ip() { :; }; get_public_ipv6', expected=1)
-        self.run_shell("ipv6_available() { return 1; }; ip() { echo UNEXPECTED; }; get_public_ipv6", expected=1)
-
-    def test_client_ipv6_port_follows_ipv6_listeners(self):
-        for listen, address, want in [
-                ('0.0.0.0:1000,[::]:2000', '2001:db8::1', '2000'),
-                ('[::]:2000,[2001:DB8::1]:3000', '2001:db8::1', '3000'),
-                ('[2001:db8::9]:04000', '2001:db8::1', '4000'),
-                ('0.0.0.0:1000', '2001:db8::1', None),
-                ('[2001:db8::8]:1,[2001:db8::9]:2', '2001:db8::1', None)]:
-            with self.subTest(listen=listen):
-                result = self.run_shell(f"client_ipv6_port '{listen}' '{address}'", expected=0 if want else 1)
-                self.assertEqual(result.stdout.strip(), want or '')
-
     def test_export_adds_ipv6_entry_only_with_ipv6_address_and_listener(self):
         self.server_config()
         self.client.write_text('HK = snell, 203.0.113.1, 40443, psk=old\n')
@@ -626,6 +604,160 @@ replace_snell_binary() { echo UNEXPECTED_REPLACE; }; update_snell''', expected=1
         self.assertIn('HK = snell, 203.0.113.1, 443, ', result.stdout)
         # The same port written with and without a leading zero is not ambiguous.
         self.assertEqual(self.run_shell("client_ipv4_port '192.0.2.1:0443,192.0.2.2:443' 203.0.113.1").stdout.strip(), '443')
+
+    def test_start_skips_reset_failed_unless_unit_failed(self):
+        for failed in (False, True):
+            with self.subTest(failed=failed):
+                result = self.run_shell(
+                    'systemctl() { case "$1" in\n'
+                    '    is-failed) return ' + ('0' if failed else '1') + ' ;;\n'
+                    '    reset-failed) echo RESET; return 1 ;;\n'
+                    '    start) echo START ;;\n'
+                    'esac; }\n'
+                    'service_action start',
+                    expected=1 if failed else 0)
+                self.assertEqual(result.stdout.split(), ['RESET'] if failed else ['START'])
+        # A disabled, unloaded unit (where reset-failed errors) is still started.
+        result = self.run_shell(
+            'systemctl() { case "$1" in is-failed|reset-failed) return 1 ;; start) echo STARTED ;; esac; }\n'
+            'service_action start')
+        self.assertIn('STARTED', result.stdout)
+
+    def test_uninstall_clears_failed_state_and_skips_absent_runlevel(self):
+        (self.root / 'etc/systemd/system/snell.service').write_text('service')
+        self.binary.write_text('core'); self.server_config()
+        result = self.run_shell(
+            'check_snell_running() { return 1; }; stop_snell() { :; }\n'
+            'systemctl() { echo "SYSTEMCTL:$*"; }; uninstall_snell')
+        self.assertIn('SYSTEMCTL:daemon-reload\nSYSTEMCTL:reset-failed snell.service', result.stdout)
+        self.assertFalse(self.binary.exists())
+        # Alpine without a default-runlevel link: rc-update del would fail, so it is not called.
+        self.server.parent.mkdir(parents=True, exist_ok=True)
+        (self.root / 'etc/init.d/snell').write_text('service')
+        self.binary.write_text('core'); self.server_config()
+        result = self.run_shell(
+            'get_system_type() { echo alpine; }\n'
+            'check_snell_running() { return 1; }; stop_snell() { :; }\n'
+            'rc-update() { echo UNEXPECTED_RC_UPDATE; return 1; }; uninstall_snell')
+        self.assertNotIn('UNEXPECTED', result.stdout)
+        self.assertFalse(self.binary.exists())
+        self.assertFalse((self.root / 'etc/init.d/snell').exists())
+        # With the link present it is removed through rc-update.
+        self.server.parent.mkdir(parents=True, exist_ok=True)
+        (self.root / 'etc/init.d/snell').write_text('service')
+        (self.root / 'etc/runlevels/default/snell').symlink_to(self.root / 'etc/init.d/snell')
+        self.binary.write_text('core'); self.server_config()
+        result = self.run_shell(
+            'get_system_type() { echo alpine; }\n'
+            'check_snell_running() { return 1; }; stop_snell() { :; }\n'
+            'rc-update() { echo "RC_UPDATE:$*"; }; uninstall_snell')
+        self.assertIn('RC_UPDATE:del snell default', result.stdout)
+
+    def test_repeat_install_after_failed_start_completes_missing_steps(self):
+        self.server_config()
+        self.binary.write_text('core'); self.binary.chmod(0o755)
+        (self.root / 'etc/systemd/system/snell.service').write_text('service')
+        # Enabled but stopped, no client entry: continue recovery (start + export).
+        result = self.run_shell(
+            'snell_service_enabled() { :; }; check_snell_running() { return 1; }\n'
+            'check_snell_stopped() { :; }; install_required_packages() { :; }; id() { :; }\n'
+            'replace_snell_binary() { echo UNEXPECTED_REPLACE; }\n'
+            'register_snell_service() { :; }; restart_snell() { echo RESTARTED; }; show_logs() { :; }\n'
+            'get_public_ip() { echo 203.0.113.1; }; get_country() { echo HK; }; install_snell')
+        self.assertIn('RESTARTED', result.stdout)
+        self.assertNotIn('已取消重复安装', result.stdout)
+        self.assertNotIn('UNEXPECTED', result.stdout)
+        self.assertIn('HK = snell, 203.0.113.1, 40443', self.client.read_text())
+        # Enabled and running, no client entry: only export, no restart.
+        self.client.unlink()
+        result = self.run_shell(
+            'snell_service_enabled() { :; }; check_snell_running() { :; }\n'
+            'restart_snell() { echo UNEXPECTED_RESTART; }\n'
+            'get_public_ip() { echo 203.0.113.1; }; get_country() { echo HK; }; install_snell')
+        self.assertNotIn('UNEXPECTED', result.stdout)
+        self.assertIn('补齐客户端条目', result.stdout)
+        self.assertTrue(self.client.exists())
+
+    def test_malformed_config_is_reported_instead_of_defaulting(self):
+        self.prepare_mode_switch()
+        self.server.write_text(self.server.read_text() + 'this line has no delimiter\n')
+        before = self.server.read_bytes()
+        for menu in ('switch_snell_mode', 'switch_snell_dns'):
+            with self.subTest(menu=menu):
+                result = self.run_shell('check_snell_installed() { :; }; ' + menu, '1\n', expected=1)
+                self.assertIn('服务端配置格式无效', result.stderr)
+                self.assertNotIn('当前已配置', result.stdout)
+        result = self.run_shell('check_snell_installed() { :; }; change_snell_port', '50000\n', expected=1)
+        self.assertIn('格式无效', result.stderr)
+        self.assertEqual(self.server.read_bytes(), before)
+
+    def test_write_failure_without_changes_is_not_reported_as_failed_recovery(self):
+        before = self.prepare_mode_switch()
+        result = self.run_shell(
+            'check_snell_installed() { :; }; check_snell_running() { return 1; }\n'
+            'check_snell_stopped() { :; }; mv() { return 1; }; switch_snell_mode', '2\n', expected=1)
+        self.assert_mode_files_unchanged(before)
+        self.assertIn('已恢复原配置', result.stderr)
+        self.assertNotIn('自动恢复未完成', result.stderr)
+
+    def test_process_in_other_mount_namespace_is_not_the_installed_core(self):
+        stub = ('readlink() { case "$1" in\n'
+                "    /proc/self/ns/mnt) echo 'mnt:[1]' ;;\n"
+                "    */ns/mnt) echo 'mnt:[NS]' ;;\n"
+                "    */exe) echo '" + str(self.binary) + "' ;;\n"
+                'esac; }; snell_process_exists')
+        self.run_shell(stub.replace('NS', '2'), expected=1)
+        self.run_shell(stub.replace('NS', '1'))
+
+    def test_port_change_merges_duplicate_endpoints_with_notice(self):
+        self.assertEqual(self.run_shell("listen_with_port '0.0.0.0:443,0.0.0.0:8443,[::]:443' 50000").stdout.strip(),
+                         '0.0.0.0:50000,[::]:50000')
+        self.prepare_mode_switch()
+        self.server.write_text(self.server.read_text().replace('[::]:40443,0.0.0.0:40443', '0.0.0.0:443,0.0.0.0:8443'))
+        result = self.run_shell(
+            'check_snell_installed() { :; }; check_snell_running() { return 1; }\n'
+            'check_snell_stopped() { :; }; ss() { :; }; change_snell_port', '50000\n')
+        self.assertIn('listen = 0.0.0.0:50000\n', self.server.read_text())
+        self.assertIn('多个端口将合并为 50000', result.stdout)
+
+    def test_public_ipv6_uses_stable_address_on_default_route_interface(self):
+        def ip(route, addrs):
+            # get_public_ipv6 runs: ip -6 route show default / ip -6 -o addr show dev IF scope global
+            return ('ip() { case "$2" in route) printf "%s\\n" "' + route + '" ;; '
+                    '-o) [ "$6" = eth0 ] && printf "' + addrs + '" ;; esac; }; ')
+        line = '2: eth0    inet6 {} scope global {} \\\\       valid_lft 1sec\\n'
+        addresses = (line.format('2001:db8::aaaa/64', 'temporary dynamic') + line.format('fd00::1/64', '') +
+                     line.format('2001:DB8::1/64', 'dynamic mngtmpaddr'))
+        default = 'default via fe80::1 dev eth0 proto ra metric 100'
+        result = self.run_shell('ipv6_available() { :; }; ' + ip(default, addresses) + 'get_public_ipv6')
+        self.assertEqual(result.stdout.strip(), '2001:db8::1')
+        for route, addrs in [
+                # WARP-style tunnels route through their own table: no main-table default route.
+                ('', addresses),
+                (default, line.format('2606:4700:110:8a36::1/128', '')),
+                (default, line.format('fd00::1/64', '')),
+                (default, '')]:
+            with self.subTest(route=route, addrs=addrs):
+                self.run_shell('ipv6_available() { :; }; ' + ip(route, addrs) + 'get_public_ipv6', expected=1)
+        self.run_shell('ipv6_available() { return 1; }; ip() { echo UNEXPECTED; }; get_public_ipv6', expected=1)
+
+    def test_client_ipv6_endpoint_follows_ipv6_listeners(self):
+        for listen, public, want in [
+                ('0.0.0.0:1000,[::]:2000', '2001:db8::1', '2001:db8::1 2000'),
+                ('[::]:2000,[2001:DB8::1]:3000', '2001:db8::1', '2001:db8::1 3000'),
+                # A single specific public bind is exported as bound, not as the interface address.
+                ('0.0.0.0:1000,[2001:db8::100]:04000', '2001:db8::1', '2001:db8::100 4000'),
+                ('[2001:db8::100]:4000', None, '2001:db8::100 4000'),
+                # Loopback, link-local and ULA binds cannot be reached from outside.
+                ('0.0.0.0:1000,[::1]:2000', '2001:db8::1', None),
+                ('[fe80::1]:2000,[fd00::1]:2001', '2001:db8::1', None),
+                ('0.0.0.0:1000', '2001:db8::1', None),
+                ('[2001:db8::8]:1,[2001:db8::9]:2', '2001:db8::1', None),
+                ('[::]:2000', None, None)]:
+            with self.subTest(listen=listen, public=public):
+                stub = ('get_public_ipv6() { echo ' + public + '; }; ') if public else 'get_public_ipv6() { return 1; }; '
+                result = self.run_shell(stub + "client_ipv6_endpoint '" + listen + "'", expected=0 if want else 1)
+                self.assertEqual(result.stdout.strip(), want or '')
 
     def test_openrc_service_discards_stdout_and_stderr(self):
         self.run_shell('write_openrc_service')
@@ -756,11 +888,13 @@ switch_snell_mode''', '2\n', expected=1)
     def test_mode_switch_cancelled_address_lookup_keeps_server_config(self):
         self.server_config(mode='default')
         before = self.server.read_bytes()
-        self.run_shell('''check_snell_installed() { :; }
+        result = self.run_shell('''check_snell_installed() { :; }
 check_snell_running() { return 1; }; check_snell_stopped() { :; }
 fetch_text() { return 1; }; switch_snell_mode''', '2\n\n', expected=1)
         self.assertEqual(self.server.read_bytes(), before)
         self.assertFalse(self.client.exists())
+        self.assertIn('模式未修改，服务端配置保持不变', result.stderr)
+        self.assertNotIn('服务已安装', result.stderr)
 
     def test_mode_switch_write_failure_preserves_both_configs(self):
         for destination in (self.server, self.client):
@@ -870,9 +1004,13 @@ restart_snell() {{ echo RESTARTED; }}; change_snell_port''', '01234\n')
         for ss in ['echo "LISTEN 0 128 0.0.0.0:1234 0.0.0.0:*"',
                    'echo "LISTEN 0 128 [::]:1234 [::]:*"', 'return 1']:
             before = self.prepare_mode_switch()
-            self.run_shell('check_snell_installed() { :; }; ss() { ' + ss + '; }; change_snell_port',
-                           '1234\n', expected=1)
+            result = self.run_shell('check_snell_installed() { :; }; ipv6_available() { :; }\n'
+                                    'check_snell_running() { return 1; }; check_snell_stopped() { :; }\n'
+                                    'restart_snell() { echo UNEXPECTED_RESTART; }; ss() { ' + ss + '; }; change_snell_port',
+                                    '1234\n', expected=1)
             self.assert_mode_files_unchanged(before)
+            self.assertNotIn('UNEXPECTED', result.stdout)
+            self.assertIn('已被占用' if 'LISTEN' in ss else '无法检查端口占用', result.stderr)
         for data, status in [('', 0), ('\n', 0), ('65536\n', 1), ('0\n', 1), ('hello\n', 1)]:
             before = self.prepare_mode_switch()
             self.run_shell('check_snell_installed() { :; }; change_snell_port', data, expected=status)
