@@ -125,13 +125,13 @@ replace_snell_binary() { echo UNEXPECTED_REPLACE; }; update_snell''', expected=1
     def test_restore_write_ignores_repeated_hangup(self):
         target = self.root / 'etc/snell/restored'
         self.run_shell(f'''chmod() {{ kill -HUP $BASHPID; command chmod "$@"; }}
-trap '' HUP INT TERM; write_file '{target}' 600 root:root <<< restored''')
+SNELL_RESTORING=1; trap '' HUP INT TERM; write_file '{target}' 600 root:root <<< restored''')
         self.assertEqual(target.read_text(), 'restored\n')
 
     def test_restore_reports_service_broken_before_change(self):
         before = self.prepare_mode_switch()
         result = self.run_shell('''check_snell_installed() { :; }; check_snell_running() { :; }
-snell_listener_pid() { return 1; }; restart_snell() { return 1; }; switch_snell_mode''', '2\n', expected=1)
+snell_listener_pid() { return 1; }; restart_snell() { return 1; }; sleep() { :; }; switch_snell_mode''', '2\n', expected=1)
         self.assert_mode_files_unchanged(before)
         self.assertIn('服务在修改前已异常', result.stderr)
         self.assertNotIn('自动恢复未完成', result.stderr)
@@ -145,8 +145,28 @@ snell_listener_pid() { return 1; }; restart_snell() { return 1; }; switch_snell_
     def test_uninstall_without_installation_is_a_no_op(self):
         self.server.parent.rmdir()
         result = self.run_shell('check_snell_running() { return 1; }; snell_process_exists() { return 1; }; uninstall_snell')
-        self.assertIn('未安装，无需卸载', result.stdout)
+        self.assertIn('未发现已安装的 Snell，残留文件已清理', result.stdout)
         self.assertNotIn('卸载成功', result.stdout)
+
+    def test_restore_ignores_hangup_in_posix_mode(self):
+        # trap -p prints a different format under POSIX mode; the restore flag must not depend on it.
+        target = self.root / 'etc/snell/restored'
+        self.run_shell(f'''set -o posix; chmod() {{ kill -HUP $BASHPID; command chmod "$@"; }}
+SNELL_RESTORING=1; trap '' HUP INT TERM; write_file '{target}' 600 root:root <<< restored''')
+        self.assertEqual(target.read_text(), 'restored\n')
+
+    def test_uninstall_cleans_residue_without_installation(self):
+        self.server.parent.rmdir()
+        wants = self.root / 'etc/systemd/system/multi-user.target.wants'
+        wants.mkdir(parents=True)
+        (wants / 'snell.service').symlink_to('/nonexistent/snell.service')
+        result = self.run_shell('check_snell_running() { return 1; }; snell_process_exists() { return 1; }; uninstall_snell')
+        self.assertFalse((wants / 'snell.service').is_symlink())
+        self.assertIn('残留文件已清理', result.stdout)
+
+    def test_alpine_missing_init_script_with_running_core_is_not_stopped(self):
+        self.run_shell('get_system_type() { echo alpine; }; snell_process_exists() { return 0; }; check_snell_stopped', expected=1)
+        self.run_shell('get_system_type() { echo alpine; }; snell_process_exists() { return 1; }; check_snell_stopped')
 
     def test_systemd_unit_stops_retrying_after_repeated_failures(self):
         self.run_shell('write_systemd_service')

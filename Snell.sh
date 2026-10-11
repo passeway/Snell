@@ -127,8 +127,8 @@ write_file() (
     local destination="$1" permissions="$2" owner="$3" temporary
     temporary=$(mktemp "${destination}.tmp.XXXXXX") || return 1
     trap 'rm -f "$temporary"' EXIT
-    # 恢复原配置时信号已被忽略；保持忽略，避免恢复写入被再次到来的挂断信号打断。
-    [ "$(trap -p HUP)" = "trap -- '' SIGHUP" ] || trap 'exit 1' HUP INT TERM
+    # 恢复原配置期间保持忽略信号，避免恢复写入被再次到来的挂断信号打断。
+    [ -n "${SNELL_RESTORING:-}" ] || trap 'exit 1' HUP INT TERM
     if ! { cat > "$temporary" &&
         chown "$owner" "$temporary" &&
         chmod "$permissions" "$temporary" &&
@@ -549,7 +549,11 @@ _apply_snell_setting() (
     local server_written=0 client_written=0 restart_attempted=0 was_healthy=0
     if check_snell_running; then
         was_running=1
-        snell_listener_pid >/dev/null 2>&1 && was_healthy=1
+        # 刚启动的服务可能尚未完成监听，短暂重试后再判断修改前是否健康。
+        for _ in 1 2 3; do
+            snell_listener_pid >/dev/null 2>&1 && { was_healthy=1; break; }
+            sleep 1
+        done
     elif ! check_snell_stopped; then
         fail "服务正在切换状态或状态异常，请稍后重试，或先通过菜单 3 停止服务"
         return 1
@@ -573,6 +577,7 @@ _apply_snell_setting() (
         local failed=0 still_broken=0
         (( server_written || client_written )) || return 0
         trap '' HUP INT TERM
+        local SNELL_RESTORING=1
         # 写入失败时原文件未被替换；只恢复内容确实变化的文件，避免磁盘满时误报恢复失败。
         if (( server_written )) && [ "$(cat /etc/snell/snell-server.conf 2>/dev/null)" != "$old_server" ]; then
             write_file /etc/snell/snell-server.conf 640 root:snell <<< "$old_server" || failed=1
@@ -947,8 +952,8 @@ check_snell_running() {
 check_snell_stopped() {
     local state result
     if [ "$(get_system_type)" = alpine ]; then
-        # 服务脚本不存在时 rc-service 返回 1，此时没有可运行的服务。
-        [ -f /etc/init.d/snell ] || return 0
+        # 服务脚本不存在时 rc-service 返回 1；仍有 Snell 进程时不能视为已停止。
+        if [ ! -f /etc/init.d/snell ]; then ! snell_process_exists; return; fi
         if rc-service snell status >/dev/null 2>&1; then result=0; else result=$?; fi
         # OpenRC 的 3 表示 stopped；4/8/16/32 等状态不能据此确认停机。
         [ "$result" -eq 3 ]
@@ -1256,11 +1261,11 @@ _update_snell() {
 uninstall_snell() { with_snell_lock _uninstall_snell "$@"; }
 
 _uninstall_snell() {
-    local has_service=0
-    if [ ! -e /usr/local/bin/snell-server ] && [ ! -e /etc/snell ] && ! snell_service_file_exists &&
-        ! check_snell_running && ! snell_process_exists; then
-        echo -e "${YELLOW}Snell 未安装，无需卸载${RESET}"
-        return 0
+    local has_service=0 found=0
+    # 未发现安装时仍执行幂等清理，移除开机启动链接、旧日志等残留。
+    if [ -e /usr/local/bin/snell-server ] || [ -L /usr/local/bin/snell-server ] || [ -e /etc/snell ] ||
+        snell_service_file_exists || check_snell_running || snell_process_exists; then
+        found=1
     fi
     echo -e "${GREEN}正在卸载 Snell${RESET}"
     snell_service_file_exists && has_service=1
@@ -1289,7 +1294,11 @@ _uninstall_snell() {
         systemctl reset-failed snell.service 2>/dev/null || true
     fi
     rm -f /usr/local/bin/snell-server && rm -rf /etc/snell || { fail "清理 Snell 文件失败"; return 1; }
-    echo -e "${GREEN}Snell 卸载成功${RESET}"
+    if (( found )); then
+        echo -e "${GREEN}Snell 卸载成功${RESET}"
+    else
+        echo -e "${YELLOW}未发现已安装的 Snell，残留文件已清理${RESET}"
+    fi
 }
 
 show_menu() {
