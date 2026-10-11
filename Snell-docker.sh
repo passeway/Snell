@@ -246,15 +246,20 @@ get_public_ip() {
     return 1
 }
 
-# VPS 的公网 IPv6 通常直接配置在网卡上，读取本机地址，不依赖外部查询；
-# 排除 ULA（fc00::/7）以及临时、过期或未完成检测的地址。
+# VPS 的公网 IPv6 通常直接配置在网卡上，读取本机地址，不依赖外部查询。
+# 只取主路由表默认 IPv6 路由所在网卡上的地址：WARP 等仅出站的隧道使用独立路由表，
+# 其地址无法入站连接；同时排除 ULA（fc00::/7）、WARP 地址段以及临时、过期或未完成检测的地址。
 get_public_ipv6() {
-    local address
+    local address device
     ipv6_available || return 1
-    address=$(ip -6 -o addr show scope global 2>/dev/null | awk '
+    device=$(ip -6 route show default 2>/dev/null | awk '{
+        for (i = 1; i < NF; i++) if ($i == "dev") { print $(i + 1); exit }
+    }')
+    [ -n "$device" ] || return 1
+    address=$(ip -6 -o addr show dev "$device" scope global 2>/dev/null | awk '
         / (temporary|deprecated|tentative|dadfailed) / { next }
         { split($4, parts, "/"); address=tolower(parts[1]) }
-        address ~ /^[0-9a-f:]+$/ && address ~ /:/ && address !~ /^f[cd]/ { print address; exit }
+        address ~ /^[0-9a-f:]+$/ && address ~ /:/ && address !~ /^f[cd]/ && address !~ /^2606:4700:110:/ { print address; exit }
     ')
     [ -n "$address" ] && printf '%s\n' "$address"
 }

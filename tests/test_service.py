@@ -32,13 +32,17 @@ install_required_packages''')
         self.assertNotIn('UNEXPECTED', result.stdout + result.stderr)
 
     def test_public_ipv6_reads_real_interface_address(self):
-        # CI containers have no global IPv6; a documentation address on lo
-        # exercises the real ip output (no duplicate address detection on lo).
-        subprocess.run(['ip', '-6', 'addr', 'add', '2001:db8::5/128', 'dev', 'lo'], check=True)
+        # CI containers have no global IPv6; a documentation address plus a default
+        # route on eth0 exercise the real ip output (nodad skips duplicate detection).
+        commands = [['ip', '-6', 'addr', '{}', '2001:db8::5/128', 'dev', 'eth0', 'nodad'],
+                    ['ip', '-6', 'route', '{}', 'default', 'dev', 'eth0', 'metric', '4000']]
+        for command in commands:
+            subprocess.run([part.format('add') for part in command], check=True)
         try:
             self.assertEqual(self.shell('get_public_ipv6').stdout.strip(), '2001:db8::5')
         finally:
-            subprocess.run(['ip', '-6', 'addr', 'del', '2001:db8::5/128', 'dev', 'lo'], check=True)
+            for command in reversed(commands):
+                subprocess.run([part.format('del') for part in command if part != 'nodad'], check=True)
         self.shell('get_public_ipv6', expected=1)
 
     def shell(self, command, data='', expected=0):
