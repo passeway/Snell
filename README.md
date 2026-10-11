@@ -65,7 +65,7 @@ Read [Inside Snell v6](https://nssurge.com/blog/snell-v6/) and the [official rel
 ## What the installer does
 
 - **Several systems, one experience**: systemd on Debian / Ubuntu / CentOS, OpenRC on Alpine, on AMD64 and ARM64.
-- **Automatic dual stack**: listens on `0.0.0.0:PORT,[::]:PORT` when IPv6 is available and exports an extra IPv6 entry.
+- **Automatic dual stack**: listens on `0.0.0.0:PORT,[::]:PORT` when IPv6 is available and exports an extra IPv6 entry when a public IPv6 address is found.
 - **Verified outcomes**: after a start or restart it checks the real core process and its listening ports, not just the service manager's state.
 - **Safe changes**: failed or interrupted configuration changes restore the previous configuration; updates keep the running or stopped state; only one management operation runs at a time.
 
