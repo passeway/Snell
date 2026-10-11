@@ -8,6 +8,7 @@ BLUE='\033[0;34m'
 PURPLE='\033[0;35m'
 CYAN='\033[0;36m'
 RESET='\033[0m'
+UNSUPPORTED_SYSTEM="仅支持 Debian、Ubuntu、CentOS Stream（及 RHEL 兼容系统）和 Alpine"
 unset SNELL_LOCK_FD
 
 get_system_type() {
@@ -16,6 +17,10 @@ get_system_type() {
     . /etc/os-release
     case "$ID" in
         debian|ubuntu|alpine) echo "$ID" ;;
+        # CentOS Stream 及 RHEL 兼容系统；CentOS 7 等不带 dnf 的旧版本已停止维护，不支持。
+        centos|rhel|rocky|almalinux)
+            if command -v dnf >/dev/null; then echo centos; else echo unknown; fi
+            ;;
         *) echo unknown ;;
     esac
 }
@@ -29,8 +34,8 @@ get_architecture() {
 }
 
 install_required_packages() {
-    local system package repair="${1:-}" status
-    local -a packages missing=()
+    local system package repair="${1:-}" status name
+    local -a packages missing=() installed=()
     system=$(get_system_type)
     case "$system" in
         debian|ubuntu)
@@ -39,10 +44,21 @@ install_required_packages() {
         alpine)
             packages=(bash wget unzip curl ca-certificates coreutils openrc gcompat libstdc++ iproute2 flock)
             ;;
-        *) echo -e "${RED}仅支持 Debian、Ubuntu 和 Alpine${RESET}"; return 1 ;;
+        centos)
+            packages=(wget unzip curl ca-certificates iproute coreutils util-linux shadow-utils libstdc++)
+            ;;
+        *) echo -e "${RED}${UNSUPPORTED_SYSTEM}${RESET}"; return 1 ;;
     esac
     for package in "${packages[@]}"; do
-        if [ "$repair" = repair ]; then
+        if [ "$system" = centos ]; then
+            # 按提供关系判断：最小化镜像中的 coreutils-single 同样提供 coreutils。
+            # 未安装时 rpm 会把提示打印到标准输出，必须以退出码判断。
+            if name=$(rpm -q --whatprovides --qf '%{NAME}\n' "$package" 2>/dev/null); then
+                installed+=("${name%%$'\n'*}")
+            else
+                missing+=("$package")
+            fi
+        elif [ "$repair" = repair ]; then
             missing+=("$package")
         elif [ "$system" = alpine ]; then
             apk info -e "$package" >/dev/null 2>&1 || missing+=("$package")
@@ -51,6 +67,12 @@ install_required_packages() {
             [[ "$status" == *' ok installed' ]] || missing+=("$package")
         fi
     done
+    if [ "$system" = centos ] && [ "$repair" = repair ]; then
+        echo -e "${GREEN}修复必要软件包${RESET}"
+        [ "${#installed[@]}" -eq 0 ] || dnf -y reinstall "${installed[@]}" || return 1
+        [ "${#missing[@]}" -eq 0 ] || dnf -y install "${missing[@]}"
+        return
+    fi
     if [ "${#missing[@]}" -eq 0 ]; then
         echo -e "${GREEN}必要软件包已齐全${RESET}"
         return 0
@@ -62,6 +84,8 @@ install_required_packages() {
         else
             apk add --no-cache "${missing[@]}"
         fi
+    elif [ "$system" = centos ]; then
+        dnf -y install "${missing[@]}"
     else
         local -a options=()
         [ "$repair" != repair ] || options+=(--reinstall)
@@ -84,6 +108,7 @@ with_snell_lock() (
             alpine) apk add --no-cache flock || return 1 ;;
             debian|ubuntu)
                 apt-get update && apt-get -o DPkg::Lock::Timeout=120 install -y util-linux || return 1 ;;
+            centos) dnf -y install util-linux || return 1 ;;
             *) fail "无法安装操作锁依赖"; return 1 ;;
         esac
     fi
@@ -1284,7 +1309,7 @@ trap 'echo -e "${RED}已取消操作${RESET}"; exit 130' INT
 main() {
     check_root
     if [ "$(get_system_type)" = unknown ]; then
-        echo -e "${RED}仅支持 Debian、Ubuntu 和 Alpine${RESET}"
+        echo -e "${RED}${UNSUPPORTED_SYSTEM}${RESET}"
         return 1
     fi
 

@@ -4,10 +4,10 @@
 
 ### One key. A distinct traffic profile.
 
-Deploy the Surge team's Snell v6 proxy protocol on Debian, Ubuntu and Alpine with a single command.
+Deploy the Surge team's Snell v6 proxy protocol on Debian, Ubuntu, CentOS and Alpine with a single command.
 
 ![Snell](https://img.shields.io/badge/Snell-v6-635BFF?style=flat-square)
-![Linux](https://img.shields.io/badge/Linux-Debian%20%7C%20Ubuntu%20%7C%20Alpine-18181B?style=flat-square)
+![Linux](https://img.shields.io/badge/Linux-Debian%20%7C%20Ubuntu%20%7C%20CentOS%20%7C%20Alpine-18181B?style=flat-square)
 ![Architecture](https://img.shields.io/badge/Arch-AMD64%20%7C%20ARM64-18181B?style=flat-square)
 [![Checks](https://github.com/passeway/Snell/actions/workflows/check.yml/badge.svg?branch=main)](https://github.com/passeway/Snell/actions/workflows/check.yml)
 
@@ -24,7 +24,7 @@ Deploy the Surge team's Snell v6 proxy protocol on Debian, Ubuntu and Alpine wit
 Run as **root**. No domain or certificate is required.
 
 ```bash
-# Debian / Ubuntu
+# Debian / Ubuntu / CentOS
 bash <(curl -fsSL https://snell-ten.vercel.app)
 ```
 
@@ -35,6 +35,8 @@ bash -c 'bash <(curl -fsSL https://snell-ten.vercel.app)'
 ```
 
 **① Choose `1` to install → ② Allow the printed TCP port in your security group and firewall → ③ Import the proxy entry into Surge**
+
+> CentOS support covers the maintained **CentOS Stream 9 / 10** (RHEL-compatible systems such as Rocky and AlmaLinux also install with `dnf`); CentOS 7 (no `dnf`) is not supported, and end-of-life CentOS 8 is not recommended because its official repositories are offline. With firewalld enabled, allow the port with `firewall-cmd --permanent --add-port=PORT/tcp && firewall-cmd --reload`.
 
 Installation sets up dependencies, a random port, a 48-character random PSK and the system service, then prints a ready-to-use Surge proxy entry. Run the same command again to open the management menu.
 
@@ -62,7 +64,7 @@ Read [Inside Snell v6](https://nssurge.com/blog/snell-v6/) and the [official rel
 
 ## What the installer does
 
-- **Three systems, one experience**: systemd on Debian / Ubuntu, OpenRC on Alpine, on AMD64 and ARM64.
+- **Several systems, one experience**: systemd on Debian / Ubuntu / CentOS, OpenRC on Alpine, on AMD64 and ARM64.
 - **Automatic dual stack**: listens on `0.0.0.0:PORT,[::]:PORT` when IPv6 is available and exports an extra IPv6 entry.
 - **Verified outcomes**: after a start or restart it checks the real core process and its listening ports, not just the service manager's state.
 - **Safe changes**: failed or interrupted configuration changes restore the previous configuration; updates keep the running or stopped state; only one management operation runs at a time.
@@ -94,7 +96,7 @@ The address, port and PSK above are placeholders. Copy the actual output.
 | `4` | Update the core, keeping the running or stopped state |
 | `5` | Restart and check the result |
 | `6` | View service status |
-| `7` | Follow logs on Debian / Ubuntu; show troubleshooting steps on Alpine |
+| `7` | Follow logs on Debian / Ubuntu / CentOS; show troubleshooting steps on Alpine |
 | `8` | Regenerate and display the Surge proxy entry |
 | `9` | Change configuration: port, mode and DNS |
 | `0` | Exit |
@@ -165,7 +167,7 @@ DNS preference only affects the address family the server uses when connecting t
 Confirm that the service is running, its TCP port is allowed, and the client address, port, PSK, version and mode match the server.
 
 ```bash
-# Debian / Ubuntu
+# Debian / Ubuntu / CentOS
 systemctl status snell --no-pager
 journalctl -u snell -n 50 --no-pager
 ```
@@ -176,7 +178,7 @@ rc-service snell status
 ```
 
 - **Alpine logs**: Snell logs are not saved and no log rotation or scheduled task is configured. For temporary diagnostics, run `rc-service snell stop`, then `/usr/local/bin/snell-server -l info -c /etc/snell/snell-server.conf` to see output in the terminal; press `Ctrl+C` when done and run `rc-service snell start`.
-- **Live logs**: on Debian / Ubuntu, press `Ctrl+C` in option **7** to return to the menu.
+- **Live logs**: on Debian / Ubuntu / CentOS, press `Ctrl+C` in option **7** to return to the menu.
 - **Public IPv4 lookup fails**: enter it manually, or cancel and retry with option **8**. If the country lookup fails, the node name defaults to `Snell`.
 - **Uninstall blocked**: if a foreground Snell diagnostic process is still running, uninstall keeps the files and asks you to end that process first.
 - **Reporting a bug**: include your OS, architecture, server and client versions, and relevant logs. Redact the PSK.
@@ -187,7 +189,7 @@ rc-service snell status
 
 <div align="center">
 
-**Continuously checked** · Native AMD64 and ARM64 CI on Debian, Ubuntu and Alpine
+**Continuously checked** · Native AMD64 and ARM64 CI on Debian, Ubuntu, CentOS Stream and Alpine
 
 Real dependency installs, all three protocol modes, five DNS preferences, and TCP and UDP payloads over IPv4 / IPv6;<br>
 real systemd / OpenRC tests for permissions, repeat installs, configuration changes, failed-start recovery, update preflight and uninstall.
