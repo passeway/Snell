@@ -200,6 +200,7 @@ umask 077; install_snell''', expected=1)
 
             # The service manager itself, not the script, must restart a crashed core.
             crashed = self.listener_pid()
+            self.assertRegex(crashed, r'^[1-9][0-9]*$')
             os.kill(int(crashed), signal.SIGKILL)
             self.wait_for(lambda: self.listener_pid() not in ('', crashed), 30,
                           'service manager did not restart a crashed core')
@@ -267,8 +268,12 @@ umask 077; install_snell''', expected=1)
                     self.server.write_text(re.sub(r'(?m)^listen\s*=.*$', f'listen = 127.0.0.1:{port}',
                                                   original.decode()))
                     # Bypass service_action so nothing resets the start counter.
-                    subprocess.run(['rc-service', 'snell', 'start'] if alpine
-                                   else ['systemctl', 'start', 'snell.service'], capture_output=True, timeout=20)
+                    started = subprocess.run(['rc-service', 'snell', 'start'] if alpine
+                                             else ['systemctl', 'start', 'snell.service'],
+                                             capture_output=True, text=True, timeout=20)
+                    if not alpine:
+                        # The start itself succeeds (Type=simple); only the core then keeps failing.
+                        self.assertEqual(started.returncode, 0, started.stdout + started.stderr)
                     if alpine:
                         status = lambda: subprocess.run(['rc-service', 'snell', 'status'],
                                                         capture_output=True, timeout=10).returncode
@@ -280,12 +285,14 @@ umask 077; install_snell''', expected=1)
                     else:
                         self.wait_for(lambda: self.probe('check_snell_stopped').returncode == 0, 90,
                                       'systemd kept restarting a core that cannot start')
-                        result = self.systemd_property('Result')
-                        print(f'systemd result after repeated failures: {result}', flush=True)
-                        if result == 'start-limit-hit':
-                            # The limit is real: a start without reset-failed is refused.
-                            self.assertNotEqual(subprocess.run(['systemctl', 'start', 'snell.service'],
-                                                               capture_output=True, timeout=20).returncode, 0)
+                        restarts = self.systemd_property('NRestarts')
+                        print(f'systemd restarts before giving up: {restarts}', flush=True)
+                        # systemd retried by itself, then stopped at the start limit.
+                        self.assertGreaterEqual(int(restarts), 1)
+                        self.assertEqual(self.systemd_property('ActiveState'), 'failed')
+                        # The limit is real: a start without reset-failed is refused.
+                        self.assertNotEqual(subprocess.run(['systemctl', 'start', 'snell.service'],
+                                                           capture_output=True, timeout=20).returncode, 0)
                     self.shell('check_snell_stopped')
             finally:
                 self.server.write_bytes(original)
@@ -302,13 +309,15 @@ umask 077; install_snell''', expected=1)
                 unit.write_text(unit.read_text().replace('StartLimitIntervalSec=60\nStartLimitBurst=5\n', '')
                                 .replace('Restart=on-failure', 'Restart=always'))
                 subprocess.run(['systemctl', 'daemon-reload'], check=True, timeout=30)
+                self.assertEqual(self.systemd_property('Restart'), 'always')
             running = self.listener_pid()
             self.shell('update_snell')
             self.assertNotIn(self.listener_pid(), ('', running))
             if alpine:
                 self.assertIn('respawn_max=5\n', script.read_text())
             else:
-                self.assertEqual(self.systemd_property('StartLimitBurst'), '5')
+                # systemd's default burst is also 5; the 60 s interval proves the refreshed unit.
+                self.assertEqual(self.systemd_property('StartLimitIntervalUSec'), '1min')
                 self.assertEqual(self.systemd_property('Restart'), 'on-failure')
                 self.assertEqual(self.systemd_property('NeedDaemonReload'), 'no')
                 self.assertEqual(self.systemd_property('UnitFileState'), 'enabled')
