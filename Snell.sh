@@ -127,7 +127,7 @@ write_file() (
     local destination="$1" permissions="$2" owner="$3" temporary
     temporary=$(mktemp "${destination}.tmp.XXXXXX") || return 1
     trap 'rm -f "$temporary"' EXIT
-    trap 'exit 1' INT TERM
+    trap 'exit 1' HUP INT TERM
     if ! { cat > "$temporary" &&
         chown "$owner" "$temporary" &&
         chmod "$permissions" "$temporary" &&
@@ -421,6 +421,7 @@ refresh_client_config() { with_snell_lock _refresh_client_config "$@"; }
 
 _refresh_client_config() {
     local client_config
+    [ -f /etc/snell/snell-server.conf ] || { fail "Snell 尚未安装或服务端配置不存在，请先安装"; return 1; }
     client_config=$(render_client_config) || { fail "客户端条目未生成，可通过菜单 8 重试"; return 1; }
     write_file /etc/snell/snell-client.conf 600 root:root <<< "$client_config" || {
         fail "写入客户端配置失败"; return 1;
@@ -805,11 +806,11 @@ service_action() (
     if [ "$(get_system_type)" = alpine ]; then
         rc-service snell "$1"
     else
-        # 修正配置后允许立即重试，避免上一次崩溃触发的启动频率限制阻碍恢复。
-        # 只清除失败状态：停用且未加载的服务执行 reset-failed 会报错。
+        # 手动启停同样计入启动频率限制：每次手动启动前清零计数和失败状态，
+        # 只让服务自身的反复崩溃受限。未加载的服务执行 reset-failed 会报错，因此跳过。
         case "$1" in
             start|restart)
-                if systemctl is-failed --quiet snell.service; then
+                if [ "$(systemctl show snell.service --property=LoadState --value 2>/dev/null)" = loaded ]; then
                     systemctl reset-failed snell.service || return 1
                 fi
                 ;;
@@ -850,8 +851,8 @@ replace_snell_binary() (
     mkdir -p /usr/local/bin || return 1
     stage=$(mktemp -d /usr/local/bin/.snell-install.XXXXXX) || return 1
     trap 'rm -rf "$stage"' EXIT
-    trap 'exit 1' INT TERM
-    timeout -k 5 180 wget --timeout=15 --tries=3 --waitretry=2 \
+    trap 'exit 1' HUP INT TERM
+    timeout --foreground -k 5 180 wget --timeout=15 --tries=3 --waitretry=2 \
         "https://dl.nssurge.com/snell/snell-server-${VERSION}-linux-${architecture}.zip" -O "$stage/snell.zip" || {
         echo -e "${RED}下载 Snell 失败或超时${RESET}"; return 1;
     }
@@ -868,7 +869,7 @@ replace_snell_binary() (
     mv -f "$stage/snell-server" /usr/local/bin/snell-server
 )
 
-snell_binary_version() { timeout -k 2 "${2:-10}" "$1" -v; }
+snell_binary_version() { timeout --foreground -k 2 "${2:-10}" "$1" -v; }
 
 restart_snell() { with_snell_lock start_snell_checked restart; }
 
@@ -941,12 +942,28 @@ check_snell_running() {
 check_snell_stopped() {
     local state result
     if [ "$(get_system_type)" = alpine ]; then
+        # 服务脚本不存在时 rc-service 返回 1，此时没有可运行的服务。
+        [ -f /etc/init.d/snell ] || return 0
         if rc-service snell status >/dev/null 2>&1; then result=0; else result=$?; fi
         # OpenRC 的 3 表示 stopped；4/8/16/32 等状态不能据此确认停机。
         [ "$result" -eq 3 ]
     else
         state=$(systemctl show snell.service --property=ActiveState --value) || return 1
         case "$state" in inactive|failed) return 0 ;; *) return 1 ;; esac
+    fi
+}
+
+# 服务管理器明确报告正在启动、停止或反复重启；查询失败不算。
+snell_service_transitioning() {
+    local result
+    if [ "$(get_system_type)" = alpine ]; then
+        [ -f /etc/init.d/snell ] || return 1
+        if rc-service snell status >/dev/null 2>&1; then return 1; else result=$?; fi
+        case "$result" in 4|8|16|32) return 0 ;; *) return 1 ;; esac
+    else
+        case "$(systemctl show snell.service --property=ActiveState --value 2>/dev/null)" in
+            activating|deactivating|reloading) return 0 ;; *) return 1 ;;
+        esac
     fi
 }
 
@@ -1046,7 +1063,7 @@ stop_snell() { with_snell_lock _stop_snell "$@"; }
 
 _stop_snell() {
     if ! service_action stop || ! wait_snell_state stopped; then
-        fail "Snell 停止失败或无法确认已经停止，保留现有文件"
+        fail "Snell 停止失败或无法确认已经停止"
         show_logs recent >&2
         return 1
     fi
@@ -1072,7 +1089,8 @@ _install_snell() {
         elif ! snell_service_enabled && check_snell_running; then
             register_snell_service || return 1
             echo "已补齐 Snell 开机启动设置，现有配置和运行状态保持不变。"
-            return 0
+            [ -f /etc/snell/snell-client.conf ] || refresh_client_config
+            return $?
         fi
     fi
     if (( has_service )); then
@@ -1194,6 +1212,7 @@ _update_snell() {
         return 1
     fi
     listen=$(config_value listen) || { fail "服务端配置无效或缺少 listen，已取消更新"; return 1; }
+    snell_service_file_exists || { fail "Snell 服务文件缺失，请先通过菜单 1 补全安装"; return 1; }
     new_listen=$(preflight_snell_update "$listen") || return 1
     install_required_packages || return 1
     secure_config_files || { fail "设置配置文件权限失败"; return 1; }
@@ -1202,7 +1221,9 @@ _update_snell() {
     if [ "$(get_system_type)" = alpine ]; then
         write_openrc_service || return 1
     else
-        write_systemd_service && systemctl daemon-reload || { fail "更新服务文件失败"; return 1; }
+        write_systemd_service && systemctl daemon-reload || {
+            fail "新内核已替换，但服务文件更新失败，服务尚未重启"; return 1;
+        }
     fi
     if [ "$new_listen" != "$listen" ]; then
         apply_snell_setting listen "$new_listen" "监听地址" 0 || return 1
@@ -1232,7 +1253,7 @@ _uninstall_snell() {
     snell_service_file_exists && has_service=1
     if (( has_service )) || check_snell_running; then
         # 无论当前处于启动、重启还是停止状态，都先执行停止并核实结果。
-        stop_snell || return 1
+        stop_snell || { fail "卸载已取消，现有文件保持不变"; return 1; }
     fi
     # 服务已停不代表前台排错进程也已结束，删除任何文件前再次检查。
     if snell_process_exists; then
@@ -1265,7 +1286,7 @@ show_menu() {
     check_snell_running
     snell_running=$?
     # 正在启动或反复重启的服务同样提供停止选项。
-    if [ $snell_installed -eq 0 ] && [ $snell_running -ne 0 ] && ! check_snell_stopped; then
+    if [ $snell_installed -eq 0 ] && [ $snell_running -ne 0 ] && snell_service_transitioning; then
         snell_running=0
     fi
 
@@ -1358,7 +1379,7 @@ main() {
                 ;;
             5)
                 if [ $snell_installed -eq 0 ]; then
-                    restart_snell
+                    restart_snell && echo -e "${GREEN}Snell 重启成功${RESET}"
                 else
                     echo -e "${RED}Snell 尚未安装${RESET}"
                 fi

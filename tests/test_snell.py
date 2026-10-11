@@ -46,7 +46,7 @@ class SnellTests(unittest.TestCase):
         # Host service managers must never be queried or changed by offline tests.
         self.code += '\nsystemctl() { [ "$1" = daemon-reload ] || return 99; }; rc-service() { return 99; }; rc-update() { return 99; }; journalctl() { return 99; }\n'
         # Keep download fixtures as shell functions; timeout itself is exercised separately.
-        self.code += '\ntimeout() { [ "$1" != -k ] || shift 2; shift; "$@"; }\n'
+        self.code += '\ntimeout() { [ "$1" != --foreground ] || shift; [ "$1" != -k ] || shift 2; shift; "$@"; }\n'
         self.code += '\neval "$(declare -f snell_listener_pid | sed \'1s/snell_listener_pid/real_snell_listener_pid/\')"\nsnell_listener_pid() { echo 123; }\n'
         self.server = self.root / 'etc/snell/snell-server.conf'
         self.client = self.root / 'etc/snell/snell-client.conf'
@@ -57,6 +57,10 @@ class SnellTests(unittest.TestCase):
                                 text=True, capture_output=True, timeout=8)
         self.assertEqual(result.returncode, expected, result.stderr + result.stdout)
         return result
+
+    def service_files(self):
+        for path in ('etc/systemd/system/snell.service', 'etc/init.d/snell'):
+            (self.root / path).write_text('service')
 
     def server_config(self, mode='unshaped', port=40443):
         self.server.write_text(f'[snell-server]\nlisten = [::]:{port},0.0.0.0:{port}\n'
@@ -101,6 +105,22 @@ check_snell_running() { return 1; }; check_snell_stopped() { :; }; show_menu''',
 systemctl() { [ "$1" = show ] && echo activating; }; snell_listener_pid() { return 1; }; show_menu''', '0\n')
         self.assertIn('3. 停止 Snell 服务', result.stdout)
         self.assertIn('异常', result.stdout)
+
+    def test_update_requires_service_file(self):
+        self.binary.write_text('old-core'); self.server_config()
+        result = self.run_shell('''check_snell_running() { return 1; }; check_snell_stopped() { :; }
+replace_snell_binary() { echo UNEXPECTED_REPLACE; }; update_snell''', expected=1)
+        self.assertNotIn('UNEXPECTED', result.stdout)
+        self.assertIn('通过菜单 1 补全安装', result.stderr)
+        self.assertEqual(self.binary.read_text(), 'old-core')
+
+    def test_menu_keeps_start_when_service_manager_cannot_answer(self):
+        self.server_config()
+        self.binary.write_text('#!/bin/sh\necho snell-server v6.0.0\n')
+        self.binary.chmod(0o755)
+        result = self.run_shell('check_snell_running() { return 1; }; show_menu', '0\n')
+        self.assertIn('3. 启动 Snell 服务', result.stdout)
+        self.assertNotIn('异常', result.stdout)
 
     def test_systemd_unit_stops_retrying_after_repeated_failures(self):
         self.run_shell('write_systemd_service')
@@ -321,6 +341,7 @@ shuf() { cat; }; choose_port''')
         self.assertEqual([p.name for p in self.binary.parent.iterdir()], ['snell-server'])
 
     def test_failed_restart_not_reported_as_update_success(self):
+        self.service_files()
         self.binary.write_text('original')
         self.server_config()
         result = self.run_shell('''check_snell_running() { return 0; }
@@ -387,6 +408,7 @@ refresh_client_config() { echo UNEXPECTED_CLIENT; }; update_snell''', expected=1
                 self.assertEqual(self.server.read_text() if self.server.exists() else None, config)
 
     def test_update_preflight_preserves_custom_and_ipv6_only_listeners(self):
+        self.service_files()
         self.binary.write_text('original')
         for listen in ('[::1]:40443', '[2001:db8::1]:40443',
                        '192.0.2.1:40443,[2001:db8::1]:40444'):
@@ -510,6 +532,9 @@ systemctl() {{ echo '{state}'; }}; stop_snell''', expected=1)
             self.run_shell(f'service_action() {{ :; }}; systemctl() {{ echo {state}; }}; stop_snell')
 
     def test_openrc_stopped_status_codes(self):
+        # Without an init script there is no service to run, whatever rc-service returns.
+        self.run_shell('get_system_type() { echo alpine; }; rc-service() { return 1; }; check_snell_stopped')
+        (self.root / 'etc/init.d/snell').write_text('service')
         for code in (0, 1, 3, 4, 8, 16, 32, 64):
             self.run_shell(f'get_system_type() {{ echo alpine; }}; rc-service() {{ return {code}; }}; check_snell_stopped', expected=0 if code == 3 else 1)
 
@@ -541,6 +566,7 @@ systemctl() {{ echo UNEXPECTED_DISABLE; }}; uninstall_snell''', expected=1)
             self.assertTrue(self.server.exists())
 
     def test_update_preserves_stopped_or_running_state_and_credentials(self):
+        self.service_files()
         for system in ('debian', 'ubuntu', 'alpine'):
             for running in (0, 1):
                 self.binary.write_text('old-core'); self.server_config()
@@ -605,7 +631,7 @@ replace_snell_binary() { echo UNEXPECTED_REPLACE; }; update_snell''', expected=1
     def test_download_timeout_keeps_binary_and_cleans_staging(self):
         self.binary.write_text('old-core')
         result = self.run_shell('timeout() { printf "BOUND:%s\\n" "$*"; return 124; }; replace_snell_binary', expected=1)
-        self.assertIn('BOUND:-k 5 180 wget --timeout=15 --tries=3', result.stdout)
+        self.assertIn('BOUND:--foreground -k 5 180 wget --timeout=15 --tries=3', result.stdout)
         self.assertEqual(self.binary.read_text(), 'old-core')
         self.assertFalse(list(self.binary.parent.glob('.snell-install.*')))
 
@@ -662,23 +688,21 @@ replace_snell_binary() { echo UNEXPECTED_REPLACE; }; update_snell''', expected=1
         # The same port written with and without a leading zero is not ambiguous.
         self.assertEqual(self.run_shell("client_ipv4_port '192.0.2.1:0443,192.0.2.2:443' 203.0.113.1").stdout.strip(), '443')
 
-    def test_start_skips_reset_failed_unless_unit_failed(self):
-        for failed in (False, True):
-            with self.subTest(failed=failed):
+    def test_start_resets_start_limit_for_loaded_unit_only(self):
+        # Manual starts count toward StartLimitBurst; each one clears the counter first.
+        for load_state, expected in (('loaded', ['RESET', 'START']), ('not-found', ['START'])):
+            with self.subTest(load_state=load_state):
                 result = self.run_shell(
                     'systemctl() { case "$1" in\n'
-                    '    is-failed) return ' + ('0' if failed else '1') + ' ;;\n'
-                    '    reset-failed) echo RESET; return 1 ;;\n'
-                    '    start) echo START ;;\n'
+                    '    show) echo ' + load_state + ' ;;\n'
+                    '    reset-failed) echo RESET ;;\n'
+                    '    start|restart) echo START ;;\n'
                     'esac; }\n'
-                    'service_action start',
-                    expected=1 if failed else 0)
-                self.assertEqual(result.stdout.split(), ['RESET'] if failed else ['START'])
-        # A disabled, unloaded unit (where reset-failed errors) is still started.
-        result = self.run_shell(
-            'systemctl() { case "$1" in is-failed|reset-failed) return 1 ;; start) echo STARTED ;; esac; }\n'
-            'service_action start')
-        self.assertIn('STARTED', result.stdout)
+                    'service_action restart')
+                self.assertEqual(result.stdout.split(), expected)
+        result = self.run_shell('systemctl() { case "$1" in show) echo loaded ;; reset-failed) return 1 ;; *) echo START ;; esac; }\n'
+                                'service_action start', expected=1)
+        self.assertNotIn('START', result.stdout)
 
     def test_uninstall_clears_failed_state_and_skips_absent_runlevel(self):
         (self.root / 'etc/systemd/system/snell.service').write_text('service')
@@ -1204,6 +1228,7 @@ restart_snell() { attempts=$((attempts+1)); [ "$attempts" -gt 1 ]; }
                          '0.0.0.0:40443')
 
     def test_update_applies_dual_stack_once_and_recovers_on_restart_failure(self):
+        self.service_files()
         for running, fails in [(False, False), (True, False), (True, True)]:
             self.binary.write_text('old-core')
             before = self.prepare_mode_switch()
@@ -1531,6 +1556,7 @@ systemctl() { echo UNEXPECTED_DISABLE; }; uninstall_snell''', expected=1)
         self.assertTrue(service.exists() and self.binary.exists() and self.server.exists())
 
     def test_update_client_failure_is_reported_as_partial_completion(self):
+        self.service_files()
         self.prepare_mode_switch(); self.binary.write_text('installed core')
         before = self.client.read_bytes()
         for failure in ('render', 'write'):
