@@ -8,7 +8,8 @@ permissions:
 jobs:
   regression:
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 15
+    # Rocky 8 镜像源偶尔很慢，构建测试镜像可能远超其他发行版。
+    timeout-minutes: ${{ contains(matrix.image, 'rockylinux') && 25 || 15 }}
     strategy:
       fail-fast: false
       matrix:

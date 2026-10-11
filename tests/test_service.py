@@ -4,10 +4,13 @@ import json
 import os
 from pathlib import Path
 import pwd
+import re
+import signal
 import socket
 import subprocess
 import tempfile
 import threading
+import time
 import unittest
 
 from test_core import CLIENT, SNELL, free_port, wait_port
@@ -87,6 +90,27 @@ ps -o pid,ppid,stat,args
             print(diagnostic.stdout + diagnostic.stderr, flush=True)
         self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
         return result
+
+    def wait_for(self, probe, seconds, message):
+        deadline = time.monotonic() + seconds
+        while time.monotonic() < deadline:
+            value = probe()
+            if value:
+                return value
+            time.sleep(0.5)
+        self.fail(message)
+
+    def probe(self, command):
+        return subprocess.run(['bash', '-c', 'source "$1"; ' + command, 'probe', str(SOURCE)],
+                              capture_output=True, text=True, timeout=20)
+
+    def listener_pid(self):
+        result = self.probe('snell_listener_pid')
+        return result.stdout.strip() if result.returncode == 0 else ''
+
+    def systemd_property(self, name):
+        return subprocess.run(['systemctl', 'show', 'snell.service', '-p', name, '--value'],
+                              capture_output=True, text=True, timeout=10).stdout.strip()
 
     def assert_traffic(self):
         fields = self.client.read_text().splitlines()[0].split(',')
@@ -172,6 +196,14 @@ umask 077; install_snell''', expected=1)
             self.assertNotEqual(identity.pw_uid, 0)
             self.shell('snell_process_exists')
             self.assert_traffic()
+            alpine = self.shell('get_system_type').stdout.strip() == 'alpine'
+
+            # The service manager itself, not the script, must restart a crashed core.
+            crashed = self.listener_pid()
+            os.kill(int(crashed), signal.SIGKILL)
+            self.wait_for(lambda: self.listener_pid() not in ('', crashed), 30,
+                          'service manager did not restart a crashed core')
+            self.assert_traffic()
 
             before = self.server.read_bytes(), self.client.read_bytes()
             repeated = self.shell('install_snell')
@@ -222,6 +254,64 @@ umask 077; install_snell''', expected=1)
                 self.assertNotIn('已更改为', failed.stdout)
             self.assertEqual((self.server.read_bytes(), self.client.read_bytes()), before)
             self.shell('snell_listener_pid')
+            self.assert_traffic()
+
+            # A core that fails at every start must end in a stopped state the menu
+            # can recover from, instead of restarting forever.
+            original = self.server.read_bytes()
+            self.shell('stop_snell')
+            try:
+                with socket.socket() as occupied:
+                    occupied.bind(('127.0.0.1', 0)); occupied.listen()
+                    port = occupied.getsockname()[1]
+                    self.server.write_text(re.sub(r'(?m)^listen\s*=.*$', f'listen = 127.0.0.1:{port}',
+                                                  original.decode()))
+                    # Bypass service_action so nothing resets the start counter.
+                    subprocess.run(['rc-service', 'snell', 'start'] if alpine
+                                   else ['systemctl', 'start', 'snell.service'], capture_output=True, timeout=20)
+                    if alpine:
+                        status = lambda: subprocess.run(['rc-service', 'snell', 'status'],
+                                                        capture_output=True, timeout=10).returncode
+                        self.wait_for(lambda: status() not in (0, 8), 90, 'supervise-daemon never gave up')
+                        print(f'OpenRC status after giving up: {status()}', flush=True)
+                        self.assertIn('3. 停止 Snell 服务' if status() != 3 else '3. 启动 Snell 服务',
+                                      self.shell('clear() { :; }; show_menu', '0\n').stdout)
+                        self.shell('stop_snell')
+                    else:
+                        self.wait_for(lambda: self.probe('check_snell_stopped').returncode == 0, 90,
+                                      'systemd kept restarting a core that cannot start')
+                        result = self.systemd_property('Result')
+                        print(f'systemd result after repeated failures: {result}', flush=True)
+                        if result == 'start-limit-hit':
+                            # The limit is real: a start without reset-failed is refused.
+                            self.assertNotEqual(subprocess.run(['systemctl', 'start', 'snell.service'],
+                                                               capture_output=True, timeout=20).returncode, 0)
+                    self.shell('check_snell_stopped')
+            finally:
+                self.server.write_bytes(original)
+            # Recovers only because service_action clears the counter before a manual start.
+            self.shell('start_snell')
+            self.assert_traffic()
+
+            # Update refreshes an outdated service definition while the service runs.
+            if alpine:
+                script = Path('/etc/init.d/snell')
+                script.write_text(script.read_text().replace('respawn_max=5\n', ''))
+            else:
+                unit = Path('/etc/systemd/system/snell.service')
+                unit.write_text(unit.read_text().replace('StartLimitIntervalSec=60\nStartLimitBurst=5\n', '')
+                                .replace('Restart=on-failure', 'Restart=always'))
+                subprocess.run(['systemctl', 'daemon-reload'], check=True, timeout=30)
+            running = self.listener_pid()
+            self.shell('update_snell')
+            self.assertNotIn(self.listener_pid(), ('', running))
+            if alpine:
+                self.assertIn('respawn_max=5\n', script.read_text())
+            else:
+                self.assertEqual(self.systemd_property('StartLimitBurst'), '5')
+                self.assertEqual(self.systemd_property('Restart'), 'on-failure')
+                self.assertEqual(self.systemd_property('NeedDaemonReload'), 'no')
+                self.assertEqual(self.systemd_property('UnitFileState'), 'enabled')
             self.assert_traffic()
 
             self.shell('stop_snell')
