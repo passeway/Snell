@@ -196,15 +196,20 @@ get_public_ip() {
     return 1
 }
 
-# VPS 的公网 IPv6 通常直接配置在网卡上，读取本机地址，不依赖外部查询；
-# 排除 ULA（fc00::/7）以及临时、过期或未完成检测的地址。
+# VPS 的公网 IPv6 通常直接配置在网卡上，读取本机地址，不依赖外部查询。
+# 只取主路由表默认 IPv6 路由所在网卡上的地址：WARP 等仅出站的隧道使用独立路由表，
+# 其地址无法入站连接；同时排除 ULA（fc00::/7）、WARP 地址段以及临时、过期或未完成检测的地址。
 get_public_ipv6() {
-    local address
+    local address device
     ipv6_available || return 1
-    address=$(ip -6 -o addr show scope global 2>/dev/null | awk '
+    device=$(ip -6 route show default 2>/dev/null | awk '{
+        for (i = 1; i < NF; i++) if ($i == "dev") { print $(i + 1); exit }
+    }')
+    [ -n "$device" ] || return 1
+    address=$(ip -6 -o addr show dev "$device" scope global 2>/dev/null | awk '
         / (temporary|deprecated|tentative|dadfailed) / { next }
         { split($4, parts, "/"); address=tolower(parts[1]) }
-        address ~ /^[0-9a-f:]+$/ && address ~ /:/ && address !~ /^f[cd]/ { print address; exit }
+        address ~ /^[0-9a-f:]+$/ && address ~ /:/ && address !~ /^f[cd]/ && address !~ /^2606:4700:110:/ { print address; exit }
     ')
     [ -n "$address" ] && printf '%s\n' "$address"
 }
@@ -282,6 +287,17 @@ config_value() {
     parse_snell_config read "$1" "${2:-/etc/snell/snell-server.conf}" "${3:-}"
 }
 
+# 未设置时输出默认值；配置无法解析时报错，不把格式错误当作默认设置。
+config_value_or() {
+    local default="$1" value status
+    shift
+    value=$(config_value "$@") && { printf '%s\n' "$value"; return 0; }
+    status=$?
+    if (( status == 1 )); then printf '%s\n' "$default"; return 0; fi
+    fail "服务端配置格式无效，请检查 /etc/snell/snell-server.conf"
+    return 1
+}
+
 surge_value() {
     local value="$1"
     if [[ "$value" =~ ^[a-zA-Z0-9_+=./:@%-]+$ ]]; then
@@ -302,14 +318,14 @@ render_client_config() {
     fi
     listen=$(config_value listen /dev/stdin <<< "$server_config") &&
         psk=$(config_value psk /dev/stdin <<< "$server_config") || {
-        fail "服务端配置缺少 listen 或 psk"; return 1;
+        fail "服务端配置缺少 listen、psk 或格式无效"; return 1;
     }
     (( ${#psk} >= 12 && ${#psk} <= 255 )) || { fail "服务端 PSK 长度必须为 12-255 字节"; return 1; }
     IFS=, read -r -a endpoints <<< "${listen//[[:space:]]/}"
     for endpoint in "${endpoints[@]}"; do
         valid_port "${endpoint##*:}" || { fail "服务端端口无效"; return 1; }
     done
-    mode=$(config_value mode /dev/stdin <<< "$server_config") || mode=default
+    mode=$(config_value_or default mode /dev/stdin <<< "$server_config") || return 1
     case "$mode" in
         default|unshaped|unsafe-raw) ;;
         *) fail "服务端 mode 无效"; return 1 ;;
@@ -325,7 +341,7 @@ render_client_config() {
         }' /etc/snell/snell-client.conf)
     fi
     if ! valid_ipv4 "$address"; then
-        address=$(get_public_ip) || { fail "服务已安装，但客户端地址未填写；可通过菜单 8 重试"; return 1; }
+        address=$(get_public_ip) || { fail "未填写客户端连接的公网 IPv4"; return 1; }
     fi
     port=$(client_ipv4_port "$listen" "$address") || return 1
     if [ -z "$label" ] || [[ "$label" == *,* || "$label" == *$'\n'* ]]; then
@@ -335,7 +351,8 @@ render_client_config() {
         "$label" "$address" "$port" "$(surge_value "$psk")" "$mode"
     # 服务器有公网 IPv6 且服务监听 IPv6 时，额外导出一条 IPv6 节点；
     # 已有的 IPv6 节点名保留，缺失、无效或与 IPv4 节点重名时使用默认名。
-    if address=$(get_public_ipv6) && port=$(client_ipv6_port "$listen" "$address"); then
+    if endpoint=$(client_ipv6_endpoint "$listen"); then
+        address=${endpoint% *}; port=${endpoint#* }
         if [ -z "$label6" ] || [ "$label6" = "$label" ] || [[ "$label6" == *,* ]]; then
             label6="${label}-v6"
         fi
@@ -348,7 +365,7 @@ refresh_client_config() { with_snell_lock _refresh_client_config "$@"; }
 
 _refresh_client_config() {
     local client_config
-    client_config=$(render_client_config) || return 1
+    client_config=$(render_client_config) || { fail "客户端条目未生成，可通过菜单 8 重试"; return 1; }
     write_file /etc/snell/snell-client.conf 600 root:root <<< "$client_config" || {
         fail "写入客户端配置失败"; return 1;
     }
@@ -384,28 +401,31 @@ client_ipv4_port() {
     fail "无法确定客户端 IPv4 对应的监听端口，请检查 listen 中的 IPv4 地址和端口"
 }
 
-# 只在服务监听 IPv6 时导出 IPv6 节点：优先精确地址，其次 [::]，
-# 再次唯一的指定地址端口；无法确定时不导出，不影响 IPv4 节点。
-client_ipv6_port() {
-    local listen="${1//[[:space:]]/}" address="$2" endpoint host port exact="" wildcard="" fallback="" ambiguous=0
-    local -a endpoints
+# IPv6 节点的地址和端口：优先使用与网卡公网地址一致的监听，其次 [::] 配合网卡公网地址，
+# 再次唯一的指定公网 IPv6 监听本身；回环、链路本地和 ULA 等无法从外部连接的绑定不导出。
+client_ipv6_endpoint() {
+    local listen="${1//[[:space:]]/}" endpoint host port wildcard="" address specific
+    local -a endpoints specifics=()
     IFS=, read -r -a endpoints <<< "$listen"
     for endpoint in "${endpoints[@]}"; do
         host=${endpoint%:*}; port=${endpoint##*:}
         [[ "$host" == \[*\] ]] && valid_port "$port" || continue
         port=$((10#$port))
-        host=${host#[}; host=${host%]}
-        if [ "${host,,}" = "${address,,}" ]; then exact=${exact:-$port}
-        elif [ "$host" = :: ]; then wildcard=${wildcard:-$port}
-        elif [ -z "$fallback" ]; then fallback=$port
-        elif [ "$fallback" != "$port" ]; then ambiguous=1
+        host=${host#[}; host=${host%]}; host=${host,,}
+        if [ "$host" = :: ]; then
+            wildcard=${wildcard:-$port}
+        elif [[ "$host" =~ ^[23][0-9a-f]{0,3}:[0-9a-f:]*$ ]]; then
+            specifics+=("$host $port")
         fi
     done
-    if [ -n "$exact" ]; then printf '%s\n' "$exact"
-    elif [ -n "$wildcard" ]; then printf '%s\n' "$wildcard"
-    elif [ -n "$fallback" ] && (( !ambiguous )); then printf '%s\n' "$fallback"
-    else return 1
+    if address=$(get_public_ipv6); then
+        for specific in "${specifics[@]}"; do
+            [ "${specific% *}" != "$address" ] || { printf '%s\n' "$specific"; return 0; }
+        done
+        [ -z "$wildcard" ] || { printf '%s %s\n' "$address" "$wildcard"; return 0; }
     fi
+    (( ${#specifics[@]} == 1 )) || return 1
+    printf '%s\n' "${specifics[0]}"
 }
 
 ipv6_available() {
@@ -443,7 +463,8 @@ listen_with_port() {
     IFS=, read -r -a addresses <<< "$listen"
     for address in "${addresses[@]}"; do
         [[ "$address" == *:* ]] && valid_port "${address##*:}" || return 1
-        result+="${result:+,}${address%:*}:$port"
+        # 同一地址的多个端口合并为一个，避免重复监听同一端口。
+        [[ ",$result," == *",${address%:*}:$port,"* ]] || result+="${result:+,}${address%:*}:$port"
     done
     [ -n "$result" ] || return 1
     printf '%s\n' "$result"
@@ -484,20 +505,25 @@ _apply_snell_setting() (
             old_client=$(cat /etc/snell/snell-client.conf) || return 1
             had_client=1
         fi
-        new_client=$(render_client_config "$new_server") || return 1
+        new_client=$(render_client_config "$new_server") || {
+            fail "客户端条目无法生成，${label}未修改，服务端配置保持不变"; return 1;
+        }
     fi
     # 原内容仅暂存在内存中，失败时恢复；不创建备份文件。
     restore_config_on_failure() {
         local failed=0
         (( server_written || client_written )) || return 0
         trap '' HUP INT TERM
-        if (( server_written )); then
+        # 写入失败时原文件未被替换；只恢复内容确实变化的文件，避免磁盘满时误报恢复失败。
+        if (( server_written )) && [ "$(cat /etc/snell/snell-server.conf 2>/dev/null)" != "$old_server" ]; then
             write_file /etc/snell/snell-server.conf 640 root:snell <<< "$old_server" || failed=1
         fi
         if (( client_written )); then
             if (( had_client )); then
-                write_file /etc/snell/snell-client.conf 600 root:root <<< "$old_client" || failed=1
-            else
+                if [ "$(cat /etc/snell/snell-client.conf 2>/dev/null)" != "$old_client" ]; then
+                    write_file /etc/snell/snell-client.conf 600 root:root <<< "$old_client" || failed=1
+                fi
+            elif [ -e /etc/snell/snell-client.conf ]; then
                 rm -f /etc/snell/snell-client.conf || failed=1
             fi
         fi
@@ -548,7 +574,7 @@ switch_snell_mode() { with_snell_lock _switch_snell_mode "$@"; }
 _switch_snell_mode() {
     local current_mode selection selected_mode
     require_snell_config || return 1
-    current_mode=$(config_value mode) || current_mode=default
+    current_mode=$(config_value_or default mode) || return 1
     echo -e "${GREEN}=== 切换 Snell 模式 ===${RESET}"
     printf '当前配置模式: %s\n' "$current_mode"
     echo "1. default（AES 加密 + 流量整形，默认）"
@@ -591,9 +617,9 @@ port_in_use() {
 
 _change_snell_port() {
     local listen port listeners new_listen endpoint running=0
-    local -a endpoints
+    local -a endpoints old_endpoints
     require_snell_config || return 1
-    listen=$(config_value listen) || return 1
+    listen=$(config_value listen) || { fail "服务端配置缺少 listen 或格式无效"; return 1; }
     printf '当前监听地址: %s\n' "$listen"
     read -r -p "请输入新端口（1-65535，留空返回）: " port || return 0
     [ -n "$port" ] || return 0
@@ -617,6 +643,10 @@ _change_snell_port() {
             return 1
         fi
     done
+    IFS=, read -r -a old_endpoints <<< "${listen//[[:space:]]/}"
+    if (( ${#endpoints[@]} < ${#old_endpoints[@]} )); then
+        echo -e "${YELLOW}同一地址原有的多个端口将合并为 ${port}；如需保留多个端口，请手动编辑服务端配置${RESET}"
+    fi
     apply_snell_setting listen "$new_listen" "监听地址" || return 1
     echo "请在云安全组和系统防火墙中放行 TCP 端口 ${port}。"
 }
@@ -627,9 +657,9 @@ _switch_snell_dns() {
     local current selection preference
     require_snell_config || return 1
     # 两个名称是同一设置，内核采用文件中最后出现的值。
-    if current=$(config_value dns-ip-preference /etc/snell/snell-server.conf ipv-preference); then :
-    elif [ "$(config_value ipv6)" = false ]; then current=ipv4-only
-    else current=default
+    current=$(config_value_or "" dns-ip-preference /etc/snell/snell-server.conf ipv-preference) || return 1
+    if [ -z "$current" ]; then
+        if [ "$(config_value ipv6)" = false ]; then current=ipv4-only; else current=default; fi
     fi
     printf '当前 DNS 模式: %s\n' "$current"
     echo "1. default（默认）"
@@ -718,7 +748,14 @@ service_action() (
         rc-service snell "$1"
     else
         # 修正配置后允许立即重试，避免上一次崩溃触发的启动频率限制阻碍恢复。
-        case "$1" in start|restart) systemctl reset-failed snell.service || return 1 ;; esac
+        # 只清除失败状态：停用且未加载的服务执行 reset-failed 会报错。
+        case "$1" in
+            start|restart)
+                if systemctl is-failed --quiet snell.service; then
+                    systemctl reset-failed snell.service || return 1
+                fi
+                ;;
+        esac
         systemctl "$1" snell.service
     fi
 )
@@ -815,8 +852,11 @@ register_snell_service() {
 
 # 服务文件缺失时，仍不能删除正在运行的内核或配置。
 snell_process_exists() {
-    local entry executable
+    local entry executable namespace
+    namespace=$(readlink /proc/self/ns/mnt 2>/dev/null)
     for entry in /proc/[0-9]*/exe; do
+        # 容器等其他挂载命名空间里的同名路径不是本机安装的内核。
+        [ -z "$namespace" ] || [ "$(readlink "${entry%/exe}/ns/mnt" 2>/dev/null)" = "$namespace" ] || continue
         executable=$(readlink "$entry" 2>/dev/null) || continue
         case "$executable" in
             /usr/local/bin/snell-server|'/usr/local/bin/snell-server (deleted)') return 0 ;;
@@ -963,10 +1003,15 @@ _install_snell() {
     [ ! -x /usr/local/bin/snell-server ] || has_binary=1
     snell_service_file_exists && has_service=1
     if (( has_config && has_binary && has_service )); then
-        if snell_service_enabled; then
+        # 上次启动失败时客户端条目尚未生成：已停止则继续补齐流程，运行中只补导出。
+        if snell_service_enabled && [ -f /etc/snell/snell-client.conf ]; then
             echo -e "${YELLOW}Snell 已完整安装，已取消重复安装；现有配置保持不变。${RESET}"
             return 0
-        elif check_snell_running; then
+        elif snell_service_enabled && check_snell_running; then
+            echo "Snell 服务已运行，补齐客户端条目。"
+            refresh_client_config
+            return $?
+        elif ! snell_service_enabled && check_snell_running; then
             register_snell_service || return 1
             echo "已补齐 Snell 开机启动设置，现有配置和运行状态保持不变。"
             return 0
@@ -1070,9 +1115,9 @@ preflight_snell_update() {
         fail "服务端配置无效或缺少 listen、psk，已取消更新"; return 1;
     }
     (( ${#psk} >= 12 && ${#psk} <= 255 )) || { fail "服务端 PSK 长度必须为 12-255 字节"; return 1; }
-    mode=$(config_value mode) || mode=default
+    mode=$(config_value_or default mode) || return 1
     case "$mode" in default|unshaped|unsafe-raw) ;; *) fail "服务端 mode 无效"; return 1 ;; esac
-    preference=$(config_value dns-ip-preference /etc/snell/snell-server.conf ipv-preference) || preference=default
+    preference=$(config_value_or default dns-ip-preference /etc/snell/snell-server.conf ipv-preference) || return 1
     case "$preference" in
         default|prefer-ipv4|prefer-ipv6|ipv4-only|ipv6-only) ;;
         *) fail "服务端 DNS 模式无效"; return 1 ;;
@@ -1154,7 +1199,10 @@ _uninstall_snell() {
         return 1
     fi
     if [ "$(get_system_type)" = alpine ]; then
-        if (( has_service )); then rc-update del snell default || return 1; fi
+        # 未加入默认运行级别时 rc-update del 会失败，只在已加入时移除。
+        if (( has_service )) && { [ -L /etc/runlevels/default/snell ] || [ -e /etc/runlevels/default/snell ]; }; then
+            rc-update del snell default || { fail "移除 Snell 开机启动失败"; return 1; }
+        fi
         rm -f /etc/runlevels/default/snell || return 1
         rm -f /etc/init.d/snell || return 1
         remove_snell_log_files || return 1
@@ -1162,6 +1210,8 @@ _uninstall_snell() {
         if (( has_service )); then systemctl disable snell || return 1; fi
         rm -f /etc/systemd/system/multi-user.target.wants/snell.service || return 1
         rm -f /etc/systemd/system/snell.service && systemctl daemon-reload || return 1
+        # 失败状态的服务在单元文件删除后仍会残留，清除后系统不再显示 degraded。
+        systemctl reset-failed snell.service 2>/dev/null || true
     fi
     rm -f /usr/local/bin/snell-server && rm -rf /etc/snell || { fail "清理 Snell 文件失败"; return 1; }
     echo -e "${GREEN}Snell 卸载成功${RESET}"

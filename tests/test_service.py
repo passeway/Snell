@@ -32,13 +32,24 @@ install_required_packages''')
         self.assertNotIn('UNEXPECTED', result.stdout + result.stderr)
 
     def test_public_ipv6_reads_real_interface_address(self):
-        # CI containers have no global IPv6; a documentation address on lo
-        # exercises the real ip output (no duplicate address detection on lo).
-        subprocess.run(['ip', '-6', 'addr', 'add', '2001:db8::5/128', 'dev', 'lo'], check=True)
+        # CI containers have no global IPv6. A documentation address and a default
+        # route on lo (no duplicate address detection there) exercise the real ip output.
+        commands = [['ip', '-6', 'addr', '{}', '2001:db8::5/128', 'dev', 'lo'],
+                    ['ip', '-6', 'route', '{}', 'default', 'dev', 'lo', 'metric', '4000']]
+
+        def run(command):
+            result = subprocess.run(command, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, f'{command}: {result.stdout}{result.stderr}')
+
+        added = []
         try:
+            for command in commands:
+                run([part.format('add') for part in command])
+                added.append(command)
             self.assertEqual(self.shell('get_public_ipv6').stdout.strip(), '2001:db8::5')
         finally:
-            subprocess.run(['ip', '-6', 'addr', 'del', '2001:db8::5/128', 'dev', 'lo'], check=True)
+            for command in reversed(added):
+                run([part.format('del') for part in command])
         self.shell('get_public_ipv6', expected=1)
 
     def shell(self, command, data='', expected=0):

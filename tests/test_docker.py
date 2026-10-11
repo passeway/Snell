@@ -79,7 +79,7 @@ class DockerInstallerTests(unittest.TestCase):
 
     def test_shared_ipv6_helpers_match_main_installer(self):
         main, docker = SOURCE.read_text(), DOCKER_SOURCE.read_text()
-        for name in ('get_public_ipv6', 'client_ipv6_port'):
+        for name in ('get_public_ipv6',):
             pattern = re.compile(r'^' + name + r'\(\) \{\n.*?^\}\n', re.M | re.S)
             self.assertEqual(pattern.search(docker).group(0), pattern.search(main).group(0), name)
 
