@@ -22,6 +22,7 @@ class ServiceTests(unittest.TestCase):
         # are allowed, while a second install/update would fail this test.
         result = self.shell('''source "$1"
 apt-get() { echo UNEXPECTED_APT >&2; return 99; }
+dnf() { echo UNEXPECTED_DNF >&2; return 99; }
 apk() {
     if [ "$1 $2" = 'info -e' ]; then command apk "$@"
     else echo UNEXPECTED_APK >&2; return 99

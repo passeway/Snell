@@ -4,10 +4,10 @@
 
 ### 一份密钥，一种流量特征
 
-在 Debian、Ubuntu 与 Alpine 上，一条命令部署 Surge 团队的 Snell v6 代理协议。
+在 Debian、Ubuntu、CentOS 与 Alpine 上，一条命令部署 Surge 团队的 Snell v6 代理协议。
 
 ![Snell](https://img.shields.io/badge/Snell-v6-635BFF?style=flat-square)
-![Linux](https://img.shields.io/badge/Linux-Debian%20%7C%20Ubuntu%20%7C%20Alpine-18181B?style=flat-square)
+![Linux](https://img.shields.io/badge/Linux-Debian%20%7C%20Ubuntu%20%7C%20CentOS%20%7C%20Alpine-18181B?style=flat-square)
 ![Architecture](https://img.shields.io/badge/Arch-AMD64%20%7C%20ARM64-18181B?style=flat-square)
 [![Checks](https://github.com/passeway/Snell/actions/workflows/check.yml/badge.svg?branch=main)](https://github.com/passeway/Snell/actions/workflows/check.yml)
 
@@ -24,7 +24,7 @@
 使用 **root** 用户执行，无需域名或证书。
 
 ```bash
-# Debian / Ubuntu
+# Debian / Ubuntu / CentOS
 bash <(curl -fsSL https://snell-ten.vercel.app)
 ```
 
@@ -35,6 +35,8 @@ bash -c 'bash <(curl -fsSL https://snell-ten.vercel.app)'
 ```
 
 **① 选择 `1` 安装 → ② 在云安全组和防火墙放行输出的 TCP 端口 → ③ 将代理条目导入 Surge**
+
+> CentOS 支持仍在维护的 **CentOS Stream 9 / 10**（Rocky、AlmaLinux 等 RHEL 兼容系统同样使用 `dnf` 安装）；不带 `dnf` 的 CentOS 7 不受支持；CentOS 8 已停止维护、官方软件源已下线，不建议使用。启用了 firewalld 时，放行端口可执行 `firewall-cmd --permanent --add-port=端口/tcp && firewall-cmd --reload`。
 
 安装会自动完成依赖、随机端口、48 位随机 PSK 与服务注册，并在最后输出可直接使用的 Surge 代理条目。再次运行同一命令即可打开管理菜单。
 
@@ -62,7 +64,7 @@ bash -c 'bash <(curl -fsSL https://snell-ten.vercel.app)'
 
 ## 这个脚本做了什么
 
-- **三种系统，一致体验**：Debian / Ubuntu 使用 systemd，Alpine 使用 OpenRC，支持 AMD64 与 ARM64。
+- **多系统，一致体验**：Debian / Ubuntu / CentOS 使用 systemd，Alpine 使用 OpenRC，支持 AMD64 与 ARM64。
 - **自动双栈**：检测到 IPv6 时监听 `0.0.0.0:端口,[::]:端口`，并额外导出 IPv6 节点。
 - **结果可核实**：启动、重启后检查真实的内核进程与监听端口，而不只是服务管理器的状态。
 - **安全的变更**：修改配置失败或被中断时自动恢复原配置；更新保留原有启停状态；同一时间只允许一个管理操作。
@@ -94,7 +96,7 @@ My-Snell = snell, YOUR_SERVER_IP, YOUR_PORT, psk=YOUR_PSK, version=6, mode=defau
 | `4` | 更新内核，保留原有启停状态 |
 | `5` | 重启并检查运行结果 |
 | `6` | 查看服务状态 |
-| `7` | Debian / Ubuntu 查看实时日志；Alpine 显示排错说明 |
+| `7` | Debian / Ubuntu / CentOS 查看实时日志；Alpine 显示排错说明 |
 | `8` | 重新生成并查看 Surge 代理条目 |
 | `9` | 调整配置：端口、模式、DNS |
 | `0` | 退出 |
@@ -165,7 +167,7 @@ DNS 偏好只影响服务端连接目标域名时的地址族，继续使用已�
 确认服务正在运行、TCP 端口已放行，客户端的地址、端口、PSK、版本和模式与服务端一致。
 
 ```bash
-# Debian / Ubuntu
+# Debian / Ubuntu / CentOS
 systemctl status snell --no-pager
 journalctl -u snell -n 50 --no-pager
 ```
@@ -176,7 +178,7 @@ rc-service snell status
 ```
 
 - **Alpine 日志**：默认不保存 Snell 日志，也不配置日志轮转或定时任务。临时排查时先执行 `rc-service snell stop`，再运行 `/usr/local/bin/snell-server -l info -c /etc/snell/snell-server.conf` 在终端查看输出；结束后按 `Ctrl+C`，执行 `rc-service snell start` 恢复服务。
-- **实时日志**：Debian / Ubuntu 的菜单 **7** 中按 `Ctrl+C` 返回菜单。
+- **实时日志**：Debian / Ubuntu / CentOS 的菜单 **7** 中按 `Ctrl+C` 返回菜单。
 - **公网 IPv4 查询失败**：可手动输入；取消后可用菜单 **8** 重试。国家信息不可用时，节点名默认为 `Snell`。
 - **卸载被阻止**：若仍有前台运行的 Snell 排错进程，卸载会保留文件并提示先结束该进程。
 - **反馈问题**：请附上系统、架构、服务端与客户端版本及错误日志，并隐藏 PSK。
@@ -187,7 +189,7 @@ rc-service snell status
 
 <div align="center">
 
-**持续验证** · AMD64 与 ARM64 原生 CI 覆盖 Debian、Ubuntu 与 Alpine
+**持续验证** · AMD64 与 ARM64 原生 CI 覆盖 Debian、Ubuntu、CentOS Stream 与 Alpine
 
 真实安装依赖，验证三种协议模式、五种 DNS 偏好与 IPv4 / IPv6 下的 TCP、UDP 转发；<br>
 在真实 systemd / OpenRC 中测试权限、重复安装、配置变更、启动失败恢复、更新预检与卸载。

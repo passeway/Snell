@@ -40,7 +40,7 @@ class SnellTests(unittest.TestCase):
         self.code += '\nchown() { printf "%s\\n" "$*" >> "' + str(self.root / 'owners') + '"; }\n'
         self.code += '\ngetent() { return 0; }\ngroupadd() { return 99; }; addgroup() { return 99; }; useradd() { return 99; }; adduser() { return 99; }\n'
         # No offline test may change packages on the host, including repair paths.
-        self.code += '\napt-get() { return 99; }; apk() { return 99; }\n'
+        self.code += '\napt-get() { return 99; }; apk() { return 99; }; dnf() { return 99; }; rpm() { return 99; }\n'
         # The host's own addresses must not leak into exports; IPv6 tests provide fixtures.
         self.code += '\nip() { return 1; }\n'
         # Host service managers must never be queried or changed by offline tests.
@@ -63,9 +63,9 @@ class SnellTests(unittest.TestCase):
                                f'psk = ChangedSecret=123456789\nmode = {mode}\n')
 
     def test_systems_and_architectures(self):
-        for system in ['debian', 'ubuntu', 'alpine', 'centos']:
+        for system in ['debian', 'ubuntu', 'alpine', 'fedora']:
             (self.root / 'os-release').write_text(f'ID={system}\n')
-            want = system if system != 'centos' else 'unknown'
+            want = system if system != 'fedora' else 'unknown'
             self.assertEqual(self.run_shell('get_system_type').stdout.strip(), want)
         for machine, want in [('x86_64', 'amd64'), ('amd64', 'amd64'),
                               ('arm64', 'aarch64'), ('aarch64', 'aarch64')]:
@@ -132,6 +132,39 @@ install_required_packages''')
                 else:
                     self.assertEqual(lines, ['APT:-o DPkg::Lock::Timeout=120 update',
                                              'APT:-o DPkg::Lock::Timeout=120 install -y unzip curl'])
+
+    def test_centos_family_requires_dnf(self):
+        for system in ('centos', 'rhel', 'rocky', 'almalinux'):
+            with self.subTest(system=system):
+                (self.root / 'os-release').write_text(f'ID={system}\n')
+                self.assertEqual(self.run_shell('dnf() { :; }; get_system_type').stdout.strip(), 'centos')
+                # CentOS 7 and other releases without dnf are end-of-life and unsupported.
+                self.assertEqual(self.run_shell('unset -f dnf; PATH=/nonexistent; get_system_type').stdout.strip(),
+                                 'unknown')
+        (self.root / 'os-release').write_text('ID=fedora\n')
+        self.assertEqual(self.run_shell('dnf() { :; }; get_system_type').stdout.strip(), 'unknown')
+
+    def test_centos_installs_only_missing_packages_and_accepts_coreutils_single(self):
+        rpm = ('rpm() { case "${@: -1}" in\n'
+               "    curl|unzip) echo \"no package provides ${@: -1}\"; return 1 ;;\n"
+               '    coreutils) echo coreutils-single ;;\n'
+               '    *) echo "${@: -1}" ;;\n'
+               'esac; }\n')
+        result = self.run_shell('get_system_type() { echo centos; }\n' + rpm +
+                                'dnf() { printf "DNF:%s\\n" "$*"; }\ninstall_required_packages')
+        self.assertEqual([l for l in result.stdout.splitlines() if l.startswith('DNF:')],
+                         ['DNF:-y install unzip curl'])
+        result = self.run_shell('get_system_type() { echo centos; }\nrpm() { echo "${@: -1}"; }\n'
+                                'dnf() { echo UNEXPECTED_DNF; }\ninstall_required_packages')
+        self.assertIn('必要软件包已齐全', result.stdout)
+        self.assertNotIn('UNEXPECTED', result.stdout)
+        # Repair reinstalls the installed providers and installs anything missing.
+        result = self.run_shell('get_system_type() { echo centos; }\n' + rpm +
+                                'dnf() { printf "DNF:%s\\n" "$*"; }\ninstall_required_packages repair')
+        lines = [l for l in result.stdout.splitlines() if l.startswith('DNF:')]
+        self.assertEqual(lines[1], 'DNF:-y install unzip curl')
+        self.assertTrue(lines[0].startswith('DNF:-y reinstall wget ca-certificates iproute coreutils-single'), lines)
+        self.assertNotIn(' curl', lines[0])
 
     def test_dependency_install_failure_stops_update_before_replacing_binary(self):
         self.binary.write_text('original'); self.server_config()
