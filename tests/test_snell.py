@@ -44,7 +44,7 @@ class SnellTests(unittest.TestCase):
         # The host's own addresses must not leak into exports; IPv6 tests provide fixtures.
         self.code += '\nip() { return 1; }\n'
         # Host service managers must never be queried or changed by offline tests.
-        self.code += '\nsystemctl() { return 99; }; rc-service() { return 99; }; rc-update() { return 99; }; journalctl() { return 99; }\n'
+        self.code += '\nsystemctl() { [ "$1" = daemon-reload ] || return 99; }; rc-service() { return 99; }; rc-update() { return 99; }; journalctl() { return 99; }\n'
         # Keep download fixtures as shell functions; timeout itself is exercised separately.
         self.code += '\ntimeout() { [ "$1" != -k ] || shift 2; shift; "$@"; }\n'
         self.code += '\neval "$(declare -f snell_listener_pid | sed \'1s/snell_listener_pid/real_snell_listener_pid/\')"\nsnell_listener_pid() { echo 123; }\n'
@@ -88,10 +88,31 @@ class SnellTests(unittest.TestCase):
         self.binary.chmod(0o755)
         result = self.run_shell('''PATH=/usr/bin:/bin
 check_snell_installed && require_snell_config || exit 1
-check_snell_running() { return 1; }; show_menu''', '0\n')
+check_snell_running() { return 1; }; check_snell_stopped() { :; }; show_menu''', '0\n')
         self.assertIn('已安装', result.stdout)
         self.assertIn('3. 启动 Snell 服务', result.stdout)
         self.assertIn('v6.0.0', result.stdout)
+
+    def test_menu_offers_stop_while_service_keeps_restarting(self):
+        self.server_config()
+        self.binary.write_text('#!/bin/sh\necho snell-server v6.0.0\n')
+        self.binary.chmod(0o755)
+        result = self.run_shell('''check_snell_running() { return 3; }
+systemctl() { [ "$1" = show ] && echo activating; }; snell_listener_pid() { return 1; }; show_menu''', '0\n')
+        self.assertIn('3. 停止 Snell 服务', result.stdout)
+        self.assertIn('异常', result.stdout)
+
+    def test_systemd_unit_stops_retrying_after_repeated_failures(self):
+        self.run_shell('write_systemd_service')
+        unit = (self.root / 'etc/systemd/system/snell.service').read_text()
+        unit_section = unit.split('[Service]')[0]
+        self.assertIn('StartLimitIntervalSec=60\n', unit_section)
+        self.assertIn('StartLimitBurst=5\n', unit_section)
+        self.assertIn('Restart=on-failure\nRestartSec=3\n', unit)
+
+    def test_manual_ipv4_drops_leading_zeros(self):
+        result = self.run_shell('fetch_text() { return 1; }; get_public_ip', '010.020.030.040\n')
+        self.assertEqual(result.stdout.strip(), '10.20.30.40')
 
     def test_unrelated_path_binary_and_nonexecutable_do_not_count_as_installed(self):
         unrelated = self.root / 'other-bin'
@@ -548,6 +569,9 @@ show_logs() {{ :; }}; refresh_client_config() {{ :; }}; update_snell''')
                 else:
                     for path in (log, cron, service):
                         self.assertEqual(path.read_text(), 'old-content')
+                    # 已安装的 systemd 主机在更新时获得新的服务文件。
+                    unit = (self.root / 'etc/systemd/system/snell.service').read_text()
+                    self.assertIn('StartLimitBurst=5', unit)
 
     def test_alpine_update_service_write_failure_is_not_success(self):
         self.binary.write_text('old-core'); self.server_config()
@@ -1514,7 +1538,7 @@ systemctl() { echo UNEXPECTED_DISABLE; }; uninstall_snell''', expected=1)
                             else 'write_file() { cat >/dev/null; return 1; }')
             result = self.run_shell('''check_snell_running() { :; }; ipv6_available() { :; }
 install_required_packages() { :; }; replace_snell_binary() { :; }
-restart_snell() { :; }; show_logs() { :; }
+restart_snell() { :; }; show_logs() { :; }; write_systemd_service() { :; }
 ''' + failing_step + '; update_snell', expected=1)
             self.assertNotIn('更新成功', result.stdout)
             self.assertIn('内核已更新，但客户端配置生成或写入失败', result.stderr)

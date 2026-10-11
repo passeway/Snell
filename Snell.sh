@@ -181,6 +181,34 @@ depend() {
 OPENRC
 }
 
+write_systemd_service() {
+    write_file /etc/systemd/system/snell.service 644 root:root << 'UNIT'
+[Unit]
+Description=Snell Proxy Service
+After=network.target
+# 连续启动失败时最终进入 failed，而不是无限重启。
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=snell
+Group=snell
+ExecStart=/usr/local/bin/snell-server -l info -c /etc/snell/snell-server.conf
+AmbientCapabilities=CAP_NET_BIND_SERVICE CAP_NET_ADMIN CAP_NET_RAW
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_NET_ADMIN CAP_NET_RAW
+LimitNOFILE=32768
+Restart=on-failure
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=snell-server
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+}
+
 valid_ipv4() {
     local octet
     local -a octets
@@ -200,6 +228,7 @@ fetch_text() {
 
 get_public_ip() {
     local endpoint address
+    local -a octets
     for endpoint in https://checkip.amazonaws.com https://api.ipify.org https://ipv4.icanhazip.com; do
         address=$(fetch_text "$endpoint" 2>/dev/null) || continue
         address=${address//$'\r'/}
@@ -213,7 +242,9 @@ get_public_ip() {
     while read -r -p "公网 IPv4（留空取消）: " address; do
         [ -n "$address" ] || return 1
         if valid_ipv4 "$address"; then
-            printf '%s\n' "$address"
+            # 去掉前导零，避免客户端按八进制解析。
+            IFS=. read -r -a octets <<< "$address"
+            printf '%d.%d.%d.%d\n' "$((10#${octets[0]}))" "$((10#${octets[1]}))" "$((10#${octets[2]}))" "$((10#${octets[3]}))"
             return 0
         fi
         echo "IPv4 地址无效，请重新输入。" >&2
@@ -1099,28 +1130,7 @@ EOF
         if [ "$(get_system_type)" = alpine ]; then
             write_openrc_service || return 1
         else
-            write_file /etc/systemd/system/snell.service 644 root:root << EOF || return 1
-[Unit]
-Description=Snell Proxy Service
-After=network.target
-
-[Service]
-Type=simple
-User=snell
-Group=snell
-ExecStart=/usr/local/bin/snell-server -l info -c /etc/snell/snell-server.conf
-AmbientCapabilities=CAP_NET_BIND_SERVICE CAP_NET_ADMIN CAP_NET_RAW
-CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_NET_ADMIN CAP_NET_RAW
-LimitNOFILE=32768
-Restart=on-failure
-RestartSec=3
-StandardOutput=journal
-StandardError=journal
-SyslogIdentifier=snell-server
-
-[Install]
-WantedBy=multi-user.target
-EOF
+            write_systemd_service || return 1
         fi
     fi
     register_snell_service || return 1
@@ -1188,8 +1198,11 @@ _update_snell() {
     install_required_packages || return 1
     secure_config_files || { fail "设置配置文件权限失败"; return 1; }
     replace_snell_binary || return 1
+    # 服务文件随更新刷新，已安装的主机也能获得新的重启策略。
     if [ "$(get_system_type)" = alpine ]; then
         write_openrc_service || return 1
+    else
+        write_systemd_service && systemctl daemon-reload || { fail "更新服务文件失败"; return 1; }
     fi
     if [ "$new_listen" != "$listen" ]; then
         apply_snell_setting listen "$new_listen" "监听地址" 0 || return 1
@@ -1251,6 +1264,10 @@ show_menu() {
     snell_installed=$?
     check_snell_running
     snell_running=$?
+    # 正在启动或反复重启的服务同样提供停止选项。
+    if [ $snell_installed -eq 0 ] && [ $snell_running -ne 0 ] && ! check_snell_stopped; then
+        snell_running=0
+    fi
 
     if [ $snell_installed -eq 0 ]; then
         installation_status="${GREEN}已安装${RESET}"
