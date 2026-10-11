@@ -36,7 +36,7 @@ bash -c 'bash <(curl -fsSL https://snell-ten.vercel.app)'
 
 **① 选择 `1` 安装 → ② 在云安全组和防火墙放行输出的 TCP 端口 → ③ 将代理条目导入 Surge**
 
-> CentOS 支持仍在维护的 **CentOS Stream 9 / 10**（Rocky、AlmaLinux 等 RHEL 兼容系统同样使用 `dnf` 安装）；不带 `dnf` 的 CentOS 7 不受支持；CentOS 8 已停止维护、官方软件源已下线，不建议使用。启用了 firewalld 时，放行端口可执行 `firewall-cmd --permanent --add-port=端口/tcp && firewall-cmd --reload`。
+> CentOS 支持仍在维护的 **CentOS Stream 9 / 10**（Rocky、AlmaLinux 等 RHEL 兼容系统同样使用 `dnf` 安装，**Rocky Linux 8** 已在 CI 中验证）；不带 `dnf` 的 CentOS 7 不受支持；CentOS 8 已停止维护、官方软件源已下线，不建议使用。启用了 firewalld 时，放行端口可执行 `firewall-cmd --permanent --add-port=端口/tcp && firewall-cmd --reload`。
 
 安装会自动完成依赖、随机端口、48 位随机 PSK 与服务注册，并在最后输出可直接使用的 Surge 代理条目。再次运行同一命令即可打开管理菜单。
 
@@ -189,7 +189,7 @@ rc-service snell status
 
 <div align="center">
 
-**持续验证** · AMD64 与 ARM64 原生 CI 覆盖 Debian、Ubuntu、CentOS Stream 与 Alpine
+**持续验证** · AMD64 与 ARM64 原生 CI 覆盖 Debian、Ubuntu、CentOS Stream、Rocky Linux 8 与 Alpine
 
 真实安装依赖，验证三种协议模式、五种 DNS 偏好与 IPv4 / IPv6 下的 TCP、UDP 转发；<br>
 在真实 systemd / OpenRC 中测试权限、重复安装、配置变更、启动失败恢复、更新预检与卸载。
