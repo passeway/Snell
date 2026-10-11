@@ -36,7 +36,7 @@ bash -c 'bash <(curl -fsSL https://snell-ten.vercel.app)'
 
 **① Choose `1` to install → ② Allow the printed TCP port in your security group and firewall → ③ Import the proxy entry into Surge**
 
-> CentOS support covers the maintained **CentOS Stream 9 / 10** (RHEL-compatible systems such as Rocky and AlmaLinux also install with `dnf`); CentOS 7 (no `dnf`) is not supported, and end-of-life CentOS 8 is not recommended because its official repositories are offline. With firewalld enabled, allow the port with `firewall-cmd --permanent --add-port=PORT/tcp && firewall-cmd --reload`.
+> CentOS support covers the maintained **CentOS Stream 9 / 10** (RHEL-compatible systems such as Rocky and AlmaLinux also install with `dnf`, and **Rocky Linux 8** is verified in CI); CentOS 7 (no `dnf`) is not supported, and end-of-life CentOS 8 is not recommended because its official repositories are offline. With firewalld enabled, allow the port with `firewall-cmd --permanent --add-port=PORT/tcp && firewall-cmd --reload`.
 
 Installation sets up dependencies, a random port, a 48-character random PSK and the system service, then prints a ready-to-use Surge proxy entry. Run the same command again to open the management menu.
 
@@ -189,7 +189,7 @@ rc-service snell status
 
 <div align="center">
 
-**Continuously checked** · Native AMD64 and ARM64 CI on Debian, Ubuntu, CentOS Stream and Alpine
+**Continuously checked** · Native AMD64 and ARM64 CI on Debian, Ubuntu, CentOS Stream, Rocky Linux 8 and Alpine
 
 Real dependency installs, all three protocol modes, five DNS preferences, and TCP and UDP payloads over IPv4 / IPv6;<br>
 real systemd / OpenRC tests for permissions, repeat installs, configuration changes, failed-start recovery, update preflight and uninstall.
