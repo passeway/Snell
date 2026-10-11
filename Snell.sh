@@ -127,7 +127,8 @@ write_file() (
     local destination="$1" permissions="$2" owner="$3" temporary
     temporary=$(mktemp "${destination}.tmp.XXXXXX") || return 1
     trap 'rm -f "$temporary"' EXIT
-    trap 'exit 1' HUP INT TERM
+    # 恢复原配置时信号已被忽略；保持忽略，避免恢复写入被再次到来的挂断信号打断。
+    [ "$(trap -p HUP)" = "trap -- '' SIGHUP" ] || trap 'exit 1' HUP INT TERM
     if ! { cat > "$temporary" &&
         chown "$owner" "$temporary" &&
         chmod "$permissions" "$temporary" &&
@@ -545,11 +546,12 @@ apply_snell_setting() { with_snell_lock _apply_snell_setting "$@"; }
 _apply_snell_setting() (
     local key="$1" value="$2" label="$3" sync_client="${4:-1}" was_running=0
     local old_server old_client="" new_server new_client="" had_client=0
-    local server_written=0 client_written=0 restart_attempted=0
+    local server_written=0 client_written=0 restart_attempted=0 was_healthy=0
     if check_snell_running; then
         was_running=1
+        snell_listener_pid >/dev/null 2>&1 && was_healthy=1
     elif ! check_snell_stopped; then
-        fail "服务正在切换状态或无法确认状态，请稍后重试"
+        fail "服务正在切换状态或状态异常，请稍后重试，或先通过菜单 3 停止服务"
         return 1
     fi
     secure_config_directory || { fail "设置配置目录权限失败"; return 1; }
@@ -568,7 +570,7 @@ _apply_snell_setting() (
     fi
     # 原内容仅暂存在内存中，失败时恢复；不创建备份文件。
     restore_config_on_failure() {
-        local failed=0
+        local failed=0 still_broken=0
         (( server_written || client_written )) || return 0
         trap '' HUP INT TERM
         # 写入失败时原文件未被替换；只恢复内容确实变化的文件，避免磁盘满时误报恢复失败。
@@ -585,10 +587,13 @@ _apply_snell_setting() (
             fi
         fi
         if (( was_running && restart_attempted && !failed )); then
-            restart_snell || failed=1
+            # 修改前服务已异常时，原配置下重启失败不代表恢复失败。
+            restart_snell || { if (( was_healthy )); then failed=1; else still_broken=1; fi; }
         fi
         if (( failed )); then
             fail "修改失败，自动恢复未完成；请检查服务端与客户端配置，并通过菜单 6、7 排查"
+        elif (( still_broken )); then
+            fail "修改未完成，已恢复原配置；服务在修改前已异常，请通过菜单 7 排查"
         else
             echo -e "${YELLOW}修改未完成，已恢复原配置${RESET}" >&2
         fi
@@ -1045,6 +1050,9 @@ wait_snell_state() {
 }
 
 start_snell_checked() {
+    snell_service_file_exists && [ -f /etc/snell/snell-server.conf ] || {
+        fail "Snell 安装不完整，请先通过菜单 1 补全安装"; return 1;
+    }
     if ! service_action "$1" || ! wait_snell_state running; then
         fail "Snell 启动或重启失败，服务未保持运行，请通过菜单 7 排查"
         show_logs recent >&2
@@ -1208,7 +1216,7 @@ _update_snell() {
     if check_snell_running; then
         was_running=1
     elif ! check_snell_stopped; then
-        fail "服务正在切换状态或无法确认状态，请稍后重试更新"
+        fail "服务正在切换状态或状态异常，请稍后重试更新，或先通过菜单 3 停止服务"
         return 1
     fi
     listen=$(config_value listen) || { fail "服务端配置无效或缺少 listen，已取消更新"; return 1; }
@@ -1249,6 +1257,11 @@ uninstall_snell() { with_snell_lock _uninstall_snell "$@"; }
 
 _uninstall_snell() {
     local has_service=0
+    if [ ! -e /usr/local/bin/snell-server ] && [ ! -e /etc/snell ] && ! snell_service_file_exists &&
+        ! check_snell_running && ! snell_process_exists; then
+        echo -e "${YELLOW}Snell 未安装，无需卸载${RESET}"
+        return 0
+    fi
     echo -e "${GREEN}正在卸载 Snell${RESET}"
     snell_service_file_exists && has_service=1
     if (( has_service )) || check_snell_running; then
