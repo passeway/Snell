@@ -103,6 +103,20 @@ My-Snell = snell, YOUR_SERVER_IP, YOUR_PORT, psk=YOUR_PSK, version=6, mode=defau
 
 服务管理器报告运行、但内核进程或监听实际不可用时，菜单显示“异常”，并保留停止选项。
 
+## 文件与配置位置
+
+| 路径 | 用途 |
+| :--- | :--- |
+| `/usr/local/bin/snell-server` | Snell 服务端程序 |
+| `/etc/snell/snell-server.conf` | 服务端监听地址、PSK、模式与 DNS 偏好 |
+| `/etc/snell/snell-client.conf` | 导出的 Surge 代理条目，菜单 **8** 会重新生成 |
+| `/etc/systemd/system/snell.service` | Debian / Ubuntu / CentOS 的服务定义 |
+| `/etc/init.d/snell` | Alpine 的 OpenRC 服务定义 |
+
+常规配置调整使用菜单 **9**。手动编辑服务端文件后，使用 **5** 重启，再使用 **8** 刷新客户端条目。修改导出的客户端文件，不会改变服务端端口、PSK 或模式。
+
+服务端配置允许 `root` 与 `snell` 组读取（权限 `640`）；客户端导出文件仅允许 `root` 读写（权限 `600`）。两者均包含连接凭据，分享排错信息前请隐藏这些内容。
+
 ## 调整配置
 
 菜单 **9** 下的三项调整都会保留其余设置。运行中的服务会自动重启并检查；已停止的服务保持停止。
