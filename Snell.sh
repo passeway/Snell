@@ -1175,6 +1175,7 @@ EOF
     # 先生成客户端条目，成功后再统一输出结果，避免失败时已显示“安装成功”。
     client_config=$(refresh_client_config) || return 1
     ports=$(listen_ports)
+    echo ""
     echo -e "${GREEN}🎉Snell 安装成功${ports:+，请在云安全组和系统防火墙中放行 TCP 端口 ${ports}}，项目地址: https://github.com/passeway/Snell${RESET}"
     printf '%s\n' "$client_config"
 }
@@ -1302,6 +1303,7 @@ _update_snell() {
     fi
     remove_snell_log_files || { fail "清理 Snell 旧日志文件失败"; return 1; }
     if (( was_running )) && [ "$(get_system_type)" != alpine ]; then show_logs recent; fi
+    echo ""
     echo -e "${GREEN}Snell 示例配置，项目地址: https://github.com/passeway/Snell${RESET}"
     refresh_client_config || {
         fail "内核已更新，但客户端配置生成或写入失败；请处理上述错误后通过菜单 8 重试"
