@@ -4,9 +4,6 @@ VERSION="v6.0.0rc2"
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
-BLUE='\033[0;34m'
-PURPLE='\033[0;35m'
-CYAN='\033[0;36m'
 RESET='\033[0m'
 UNSUPPORTED_SYSTEM="仅支持 Debian、Ubuntu、CentOS Stream（及 RHEL 兼容系统）和 Alpine"
 unset SNELL_LOCK_FD
@@ -440,7 +437,7 @@ render_client_config() {
     fi
 }
 
-refresh_client_config() { with_snell_lock _refresh_client_config "$@"; }
+refresh_client_config() { with_snell_lock _refresh_client_config; }
 
 _refresh_client_config() {
     local client_config
@@ -658,7 +655,7 @@ require_snell_config() {
     }
 }
 
-switch_snell_mode() { with_snell_lock _switch_snell_mode "$@"; }
+switch_snell_mode() { with_snell_lock _switch_snell_mode; }
 
 _switch_snell_mode() {
     local current_mode selection selected_mode
@@ -686,7 +683,7 @@ _switch_snell_mode() {
     apply_snell_setting mode "$selected_mode" "模式"
 }
 
-change_snell_port() { with_snell_lock _change_snell_port "$@"; }
+change_snell_port() { with_snell_lock _change_snell_port; }
 
 # 按地址族判断监听冲突：IPv6 地址只与 IPv6 监听冲突，IPv4 同理；
 # ss 显示为 *:端口 的双栈监听与两种地址族都冲突。同一地址族内，
@@ -747,7 +744,7 @@ _change_snell_port() {
     echo "请在云安全组和系统防火墙中放行 TCP 端口 ${port}。"
 }
 
-switch_snell_dns() { with_snell_lock _switch_snell_dns "$@"; }
+switch_snell_dns() { with_snell_lock _switch_snell_dns; }
 
 _switch_snell_dns() {
     local current selection preference
@@ -1100,14 +1097,14 @@ start_snell_checked() {
     fi
 }
 
-start_snell() { with_snell_lock _start_snell "$@"; }
+start_snell() { with_snell_lock _start_snell; }
 
 _start_snell() {
     start_snell_checked start || return 1
     echo -e "${GREEN}Snell 启动成功${RESET}"
 }
 
-stop_snell() { with_snell_lock _stop_snell "$@"; }
+stop_snell() { with_snell_lock _stop_snell; }
 
 _stop_snell() {
     if ! service_action stop || ! wait_snell_state stopped; then
@@ -1118,7 +1115,7 @@ _stop_snell() {
     echo -e "${GREEN}Snell 停止成功${RESET}"
 }
 
-install_snell() { with_snell_lock _install_snell "$@"; }
+install_snell() { with_snell_lock _install_snell; }
 
 _install_snell() {
     local has_config=0 has_binary=0 has_service=0
@@ -1220,7 +1217,7 @@ listen_ports() {
     tr ',' '\n' <<< "${listen//[[:space:]]/}" | sed 's/.*://' | awk '{ print $1 + 0 }' | sort -un | paste -sd/ -
 }
 
-update_snell() { with_snell_lock _update_snell "$@"; }
+update_snell() { with_snell_lock _update_snell; }
 
 # 仅做本地预检；不依赖公网地址或客户端导出，也不启动第二个服务进程。
 valid_listen_ip() {
@@ -1345,7 +1342,7 @@ _update_snell() {
     echo -e "${GREEN}🎉Snell 更新成功${RESET}"
 }
 
-uninstall_snell() { with_snell_lock _uninstall_snell "$@"; }
+uninstall_snell() { with_snell_lock _uninstall_snell; }
 
 _uninstall_snell() {
     local has_service=0 found=0 manager_available=1
