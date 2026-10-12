@@ -6,6 +6,13 @@ on:
 permissions:
   contents: read
 jobs:
+  shellcheck:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - name: Lint shell scripts
+        run: shellcheck -S warning Snell.sh Snell-docker.sh tests/ci/*.sh
   regression:
     runs-on: ${{ matrix.runner }}
     # Rocky 8 镜像源偶尔很慢，构建测试镜像可能远超其他发行版。
