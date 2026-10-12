@@ -124,20 +124,64 @@ choose_port() {
     fail "未找到可用的随机 TCP 端口"
 }
 
-# 读取 [snell-server] 节中的单个字段，忽略注释，后出现的值覆盖前值。
-config_value() {
-    awk -v key="$1" '
-        { line=$0; sub(/^[[:space:]]+/, "", line); sub(/[[:space:]]+$/, "", line) }
-        line == "" || line ~ /^[#;]/ { next }
-        substr(line, 1, 1) == "[" { active=(line ~ /^\[snell-server\]/); next }
-        active && match(line, /[=:]/) {
-            name=substr(line, 1, RSTART-1); sub(/[[:space:]]+$/, "", name)
-            if (name != key) next
-            value=substr(line, RSTART+1); gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
-            result=value; found=1
+# 与主安装器使用相同的 INI 语义，包括行尾注释、续行与 BOM。
+parse_snell_config() {
+    SNELL_CONFIG_REPLACEMENT="${5:-}" LC_ALL=C awk \
+        -v operation="$1" -v key="$2" -v alias="${4:-}" '
+        function append_setting() {
+            if (operation == "write" && active)
+                print key " = " ENVIRON["SNELL_CONFIG_REPLACEMENT"]
         }
-        END { if (found) print result; else exit 1 }
-    ' "${2:-$CONFIG_FILE}"
+        {
+            original=$0; line=$0
+            if (NR == 1) sub(/^\357\273\277/, "", line)
+            sub(/[[:space:]]+$/, "", line)
+            indented=(line ~ /^[[:space:]]/)
+            sub(/^[[:space:]]+/, "", line)
+            if (line == "" || line ~ /^[#;]/) {
+                if (operation == "write") print original
+                next
+            }
+            if (previous != "" && indented) {
+                # 当前内核的续行保留行内分号，不按普通赋值行处理。
+                name=previous; value=line
+            } else if (substr(line, 1, 1) == "[") {
+                header=line; sub(/[[:space:]];.*$/, "", header)
+                if (!match(header, /\]/)) { invalid=1; next }
+                append_setting()
+                active=(substr(header, 2, RSTART-2) == "snell-server")
+                previous=""
+                if (active) sections++
+                if (operation == "write") print original
+                next
+            } else {
+                assignment=line; sub(/[[:space:]];.*$/, "", assignment)
+                if (!match(assignment, /[=:]/)) { invalid=1; next }
+                name=substr(assignment, 1, RSTART-1)
+                sub(/[[:space:]]+$/, "", name)
+                if (name == "") { invalid=1; next }
+                value=substr(assignment, RSTART+1)
+                gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
+                previous=name
+            }
+            matched=(active && (name == key || (alias != "" && name == alias)))
+            if (matched) { result=value; found=1 }
+            if (operation == "write" && !matched) print original
+        }
+        END {
+            if (invalid) exit 2
+            if (operation == "write") {
+                if (sections != 1) exit 2
+                # 放在节末，避免改变原本首个缩进字段的归属。
+                append_setting()
+            } else if (found) print result
+            else exit 1
+        }
+    ' "$3"
+}
+
+config_value() {
+    parse_snell_config read "$1" "${2:-$CONFIG_FILE}"
 }
 
 write_server_config() {
@@ -264,28 +308,54 @@ get_public_ipv6() {
     [ -n "$address" ] && printf '%s\n' "$address"
 }
 
-# 只在服务监听 IPv6 时导出 IPv6 节点：优先精确地址，其次 [::]，
-# 再次唯一的指定地址端口；无法确定时不导出，不影响 IPv4 节点。
-client_ipv6_port() {
-    local listen="${1//[[:space:]]/}" address="$2" endpoint host port exact="" wildcard="" fallback="" ambiguous=0
+client_ipv4_port() {
+    local listen="${1//[[:space:]]/}" address="$2" endpoint host port fallback="" wildcard="" exact="" ambiguous=0
     local -a endpoints
+    IFS=, read -r -a endpoints <<< "$listen"
+    for endpoint in "${endpoints[@]}"; do
+        [[ "$endpoint" == *:* ]] || { fail "监听地址格式无效"; return 1; }
+        host=${endpoint%:*}; port=${endpoint##*:}
+        valid_port "$port" || { fail "服务端端口无效"; return 1; }
+        port=$((10#$port))
+        [[ "$host" != *:* ]] || continue
+        [ "$host" != "$address" ] || exact=${exact:-$port}
+        [ "$host" != 0.0.0.0 ] || wildcard=${wildcard:-$port}
+        # NAT 部署允许私有绑定地址，但多个不同端口不能静默猜选。
+        if valid_ipv4 "$host"; then
+            if [ -z "$fallback" ]; then fallback=$port
+            elif [ "$fallback" != "$port" ]; then ambiguous=1
+            fi
+        fi
+    done
+    if [ -n "$exact" ]; then printf '%s\n' "$exact"; return 0; fi
+    if [ -n "$wildcard" ]; then printf '%s\n' "$wildcard"; return 0; fi
+    if [ -n "$fallback" ] && (( !ambiguous )); then printf '%s\n' "$fallback"; return 0; fi
+    fail "无法确定客户端 IPv4 对应的监听端口，请检查 listen 中的 IPv4 地址和端口"
+}
+
+client_ipv6_endpoint() {
+    local listen="${1//[[:space:]]/}" endpoint host port wildcard="" address specific
+    local -a endpoints specifics=()
     IFS=, read -r -a endpoints <<< "$listen"
     for endpoint in "${endpoints[@]}"; do
         host=${endpoint%:*}; port=${endpoint##*:}
         [[ "$host" == \[*\] ]] && valid_port "$port" || continue
         port=$((10#$port))
-        host=${host#[}; host=${host%]}
-        if [ "${host,,}" = "${address,,}" ]; then exact=${exact:-$port}
-        elif [ "$host" = :: ]; then wildcard=${wildcard:-$port}
-        elif [ -z "$fallback" ]; then fallback=$port
-        elif [ "$fallback" != "$port" ]; then ambiguous=1
+        host=${host#[}; host=${host%]}; host=${host,,}
+        if [ "$host" = :: ]; then
+            wildcard=${wildcard:-$port}
+        elif [[ "$host" =~ ^[23][0-9a-f]{0,3}:[0-9a-f:]*$ ]]; then
+            specifics+=("$host $port")
         fi
     done
-    if [ -n "$exact" ]; then printf '%s\n' "$exact"
-    elif [ -n "$wildcard" ]; then printf '%s\n' "$wildcard"
-    elif [ -n "$fallback" ] && (( !ambiguous )); then printf '%s\n' "$fallback"
-    else return 1
+    if address=$(get_public_ipv6); then
+        for specific in "${specifics[@]}"; do
+            [ "${specific% *}" != "$address" ] || { printf '%s\n' "$specific"; return 0; }
+        done
+        [ -z "$wildcard" ] || { printf '%s %s\n' "$address" "$wildcard"; return 0; }
     fi
+    (( ${#specifics[@]} == 1 )) || return 1
+    printf '%s\n' "${specifics[0]}"
 }
 
 get_country() {
@@ -307,16 +377,23 @@ surge_value() {
 }
 
 render_client_config() {
-    local address="$1" label="$2" listen port psk mode
+    local LC_ALL=C address="$1" label="$2" listen port psk mode endpoint status
     listen=$(config_value listen) && psk=$(config_value psk) || { fail "服务端配置缺少 listen 或 psk"; return 1; }
     listen=${listen//[[:space:]]/}
-    port=${listen%%,*}; port=${port##*:}
-    valid_port "$port" || { fail "服务端端口无效"; return 1; }
-    mode=$(config_value mode) || mode=default
+    port=$(client_ipv4_port "$listen" "$address") || return 1
+    (( ${#psk} >= 12 && ${#psk} <= 255 )) || { fail "服务端 PSK 长度必须为 12-255 字节"; return 1; }
+    if mode=$(config_value mode); then :
+    else
+        status=$?
+        [ "$status" -eq 1 ] || { fail "服务端配置格式无效"; return 1; }
+        mode=default
+    fi
+    case "$mode" in default|unshaped|unsafe-raw) ;; *) fail "服务端 mode 无效"; return 1 ;; esac
     printf '%s = snell, %s, %s, psk=%s, version=6, mode=%s, reuse=true\n' \
         "$label" "$address" "$((10#$port))" "$(surge_value "$psk")" "$mode"
     # 服务器有公网 IPv6 且服务监听 IPv6 时，额外导出一条 IPv6 节点。
-    if address=$(get_public_ipv6) && port=$(client_ipv6_port "$listen" "$address"); then
+    if endpoint=$(client_ipv6_endpoint "$listen"); then
+        read -r address port <<< "$endpoint"
         printf '%s-v6 = snell, %s, %s, psk=%s, version=6, mode=%s, reuse=true\n' \
             "$label" "$address" "$port" "$(surge_value "$psk")" "$mode"
     fi
@@ -357,3 +434,4 @@ main() {
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
     main "$@"
 fi
+

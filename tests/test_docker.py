@@ -79,9 +79,50 @@ class DockerInstallerTests(unittest.TestCase):
 
     def test_shared_ipv6_helpers_match_main_installer(self):
         main, docker = SOURCE.read_text(), DOCKER_SOURCE.read_text()
-        for name in ('get_public_ipv6',):
+        for name in ('get_public_ipv6', 'parse_snell_config', 'client_ipv4_port', 'client_ipv6_endpoint'):
             pattern = re.compile(r'^' + name + r'\(\) \{\n.*?^\}\n', re.M | re.S)
             self.assertEqual(pattern.search(docker).group(0), pattern.search(main).group(0), name)
+
+    def test_export_matches_address_family_and_explicit_ipv6_binding(self):
+        self.config.parent.mkdir()
+        for listen, expected4, expected6 in [
+            ('[::]:40444,0.0.0.0:40443', '40443', ('2001:db8::1', '40444')),
+            ('0.0.0.0:40443,[2001:db8::2]:40444', '40443', ('2001:db8::2', '40444')),
+            ('0.0.0.0:40443,[fd00::2]:40444', '40443', None),
+            ('0.0.0.0:40443,[2001:db8::2]:40444,[2001:db8::3]:40445', '40443', None),
+        ]:
+            with self.subTest(listen=listen):
+                self.config.write_text(f'[snell-server]\nlisten={listen}\npsk=KeepThisSecret99\nmode=default\n')
+                lines = self.run_shell('get_public_ipv6() { echo 2001:db8::1; }; render_client_config 203.0.113.9 HK').stdout.splitlines()
+                self.assertEqual(proxy_fields(lines[0].split('=', 1)[1])[1:3], ['203.0.113.9', expected4])
+                self.assertEqual(len(lines), 2 if expected6 else 1)
+                if expected6:
+                    self.assertEqual(proxy_fields(lines[1].split('=', 1)[1])[1:3], list(expected6))
+
+    def test_export_rejects_missing_or_ambiguous_ipv4_listener(self):
+        self.config.parent.mkdir()
+        for listen in ['[::]:40444', '10.0.0.1:40443,10.0.0.2:40444']:
+            self.config.write_text(f'[snell-server]\nlisten={listen}\npsk=KeepThisSecret99\nmode=default\n')
+            result = self.run_shell('render_client_config 203.0.113.9 HK', expected=1)
+            self.assertEqual(result.stdout, '')
+
+    def test_export_uses_effective_ini_values(self):
+        self.config.parent.mkdir()
+        self.config.write_text('\ufeff[snell-server]\nlisten=0.0.0.0:40443 ; listener\n'
+                               'psk=KeepThisSecret99 ; comment\nmode=default\n  unshaped\n')
+        line = self.run_shell('render_client_config 203.0.113.9 HK').stdout.strip()
+        fields = proxy_fields(line.split('=', 1)[1])
+        self.assertIn('psk=KeepThisSecret99', fields)
+        self.assertIn('mode=unshaped', fields)
+        self.config.write_text('[snell-server]\nlisten=0.0.0.0:40443\n'
+                               'psk=KeepThisSecret99\nmode=default ; comment\n')
+        self.assertIn('mode=default, reuse=true', self.run_shell('render_client_config 203.0.113.9 HK').stdout)
+
+    def test_export_rejects_malformed_config_before_printing(self):
+        self.config.parent.mkdir()
+        self.config.write_text('[snell-server]\nlisten=0.0.0.0:40443\npsk=KeepThisSecret99\nbroken line\n')
+        result = self.run_shell('render_client_config 203.0.113.9 HK', expected=1)
+        self.assertEqual(result.stdout, '')
 
     def test_compose_uses_local_v6_build(self):
         self.root.joinpath('snell-conf').mkdir()
@@ -96,3 +137,4 @@ class DockerInstallerTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
