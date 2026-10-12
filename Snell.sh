@@ -107,7 +107,7 @@ with_snell_lock() (
         case "$(get_system_type)" in
             alpine) apk add --no-cache flock || return 1 ;;
             debian|ubuntu)
-                apt-get update && apt-get -o DPkg::Lock::Timeout=120 install -y util-linux || return 1 ;;
+                apt-get -o DPkg::Lock::Timeout=120 update && apt-get -o DPkg::Lock::Timeout=120 install -y util-linux || return 1 ;;
             centos) dnf -y install util-linux || return 1 ;;
             *) fail "无法安装操作锁依赖"; return 1 ;;
         esac

@@ -1678,6 +1678,14 @@ main''', '2\ny\n\n0\n')
                     self.assertFalse(self.binary.exists())
                     self.assertFalse(self.server.parent.exists())
 
+    def test_lock_dependency_install_waits_for_apt_lock(self):
+        # Without flock, Debian installs util-linux; both apt steps must wait for the dpkg lock.
+        result = self.run_shell('''get_system_type() { echo debian; }
+command() { [ "$2" != flock ] && builtin command "$@"; }
+apt-get() { echo "apt-get $*"; return 1; }
+with_snell_lock true''', expected=1)
+        self.assertEqual(result.stdout.splitlines(), ['apt-get -o DPkg::Lock::Timeout=120 update'])
+
     def test_menu_uninstall_requires_explicit_confirmation(self):
         self.server_config(); self.binary.write_text('installed core'); self.binary.chmod(0o755)
         for answer in ('\n', 'n\n', 'yes\n', ''):
