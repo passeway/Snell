@@ -1171,18 +1171,20 @@ EOF
     remove_snell_log_files || { fail "清理 Snell 旧日志文件失败"; return 1; }
     echo -e "${GREEN}Snell 服务已启动${RESET}"
     if [ "$(get_system_type)" != alpine ]; then show_logs recent; fi
-    echo -e "${GREEN}Snell 示例配置，项目地址: https://github.com/passeway/Snell${RESET}"
-    refresh_client_config || return 1
-    print_firewall_hint
-    echo -e "${GREEN}🎉Snell 安装成功${RESET}"
+    local client_config ports
+    # 先生成客户端条目，成功后再统一输出结果，避免失败时已显示“安装成功”。
+    client_config=$(refresh_client_config) || return 1
+    ports=$(listen_ports)
+    echo -e "${GREEN}🎉Snell 安装成功${ports:+，请在云安全组和系统防火墙中放行 TCP 端口 ${ports}}${RESET}"
+    echo -e "${GREEN}项目地址: https://github.com/passeway/Snell${RESET}"
+    printf '%s\n' "$client_config"
 }
 
-print_firewall_hint() {
-    local listen ports
+# 监听端口去重后以 / 连接；IPv4 与 IPv6 可能使用不同端口。
+listen_ports() {
+    local listen
     listen=$(config_value listen 2>/dev/null) || return 0
-    # IPv4 与 IPv6 可能使用不同端口，去重后一并提示。
-    ports=$(tr ',' '\n' <<< "${listen//[[:space:]]/}" | sed 's/.*://' | sort -un | paste -sd/ -)
-    [ -z "$ports" ] || echo -e "${YELLOW}请在云安全组和系统防火墙中放行 TCP 端口 ${ports}${RESET}"
+    tr ',' '\n' <<< "${listen//[[:space:]]/}" | sed 's/.*://' | awk '{ print $1 + 0 }' | sort -un | paste -sd/ -
 }
 
 update_snell() { with_snell_lock _update_snell "$@"; }
