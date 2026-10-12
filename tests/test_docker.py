@@ -195,5 +195,3 @@ get_public_ip() { echo 203.0.113.9; }; get_country() { echo HK; }; main''')
 
 if __name__ == '__main__':
     unittest.main()
-
-

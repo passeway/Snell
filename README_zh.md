@@ -102,7 +102,7 @@ bash -c 'bash <(curl -fsSL https://snell-ten.vercel.app)'
 
 安装会自动完成依赖、随机端口、48 位随机 PSK 与服务注册，并在最后输出可直接使用的 Surge 代理条目。再次运行同一命令即可打开管理菜单。
 
-> 当前安装官方 **v6.0.0rc2** 测试版本，默认 `mode=default`。客户端需支持 Snell v6，且 `mode` 与服务端一致。测试期间协议可能出现不兼容变更，请让客户端与服务端都保持最新版本（服务端用菜单 **4** 更新）。
+> 当前安装官方 **v6.0.0rc2** 候选版（RC），默认 `mode=default`。客户端需支持 Snell v6，且 `mode` 与服务端一致。v6 正式版发布前协议仍可能出现不兼容变更，请让客户端与服务端都保持最新版本（服务端用菜单 **4** 更新）。
 
 > CentOS 支持仍在维护的 **CentOS Stream 9 / 10**（Rocky、AlmaLinux 等 RHEL 兼容系统同样使用 `dnf` 安装，**Rocky Linux 8** 已在 CI 中验证）；不带 `dnf` 的 CentOS 7 不受支持；CentOS 8 已停止维护、官方软件源已下线，不建议使用。启用了 firewalld 时，放行端口可执行 `firewall-cmd --permanent --add-port=端口/tcp && firewall-cmd --reload`。
 
@@ -202,6 +202,24 @@ DNS 偏好只影响服务端连接目标域名时的地址族，继续使用已�
 - IPv6 节点的端口取 IPv6 监听端口，PSK 与模式和 IPv4 节点相同。
 - IPv4 与 IPv6 使用不同端口时，IPv4 节点匹配 IPv4 监听端口；无法确定时保留原客户端条目并提示检查。
 - 公网 IPv6 接入同样需要在防火墙中放行端口。v6 用 TCP 承载 UDP 转发，无需额外开放同端口 UDP。
+
+</details>
+
+<details>
+<summary><strong>Docker 部署</strong></summary>
+
+Debian、Ubuntu、Alpine 上也可以使用 root 通过 Docker Compose 部署：
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/passeway/Snell/main/Snell-docker.sh)
+```
+
+- 缺少时自动安装 Docker 与 Compose 插件，在本地用官方内核构建 `snell-server` 镜像（不依赖第三方镜像），以 host 网络运行。
+- 输出 Surge 代理条目，服务器有公网 IPv6 时额外输出 `-v6` 节点；重复运行保留已有端口和 PSK。
+- 文件位于 `/root/snell-docker/`，配置为 `snell-conf/snell.conf`。
+- 通过 `docker compose` 管理，不使用本菜单；不要与菜单安装的服务同时占用同一端口。
+
+常用指令与卸载方法见 [Snell-docker.md](Snell-docker.md)。
 
 </details>
 
