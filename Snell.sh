@@ -1273,15 +1273,18 @@ _update_snell() {
 uninstall_snell() { with_snell_lock _uninstall_snell "$@"; }
 
 _uninstall_snell() {
-    local has_service=0 found=0
+    local has_service=0 found=0 manager_available=1
+    if [ "$(get_system_type)" != alpine ] && ! systemd_running; then
+        manager_available=0
+    fi
     # 未发现安装时仍执行幂等清理，移除开机启动链接、旧日志等残留。
     if [ -e /usr/local/bin/snell-server ] || [ -L /usr/local/bin/snell-server ] || [ -e /etc/snell ] ||
-        snell_service_file_exists || check_snell_running || snell_process_exists; then
+        snell_service_file_exists || { (( manager_available )) && check_snell_running; } || snell_process_exists; then
         found=1
     fi
     echo -e "${GREEN}正在卸载 Snell${RESET}"
     snell_service_file_exists && has_service=1
-    if (( has_service )) || check_snell_running; then
+    if (( manager_available )) && { (( has_service )) || check_snell_running; }; then
         # 无论当前处于启动、重启还是停止状态，都先执行停止并核实结果。
         stop_snell || { fail "卸载已取消，现有文件保持不变"; return 1; }
     fi
@@ -1299,7 +1302,7 @@ _uninstall_snell() {
         rm -f /etc/init.d/snell || return 1
         remove_snell_log_files || return 1
     else
-        if (( has_service )); then systemctl disable snell || return 1; fi
+        if (( has_service && manager_available )); then systemctl disable snell || return 1; fi
         rm -f /etc/systemd/system/multi-user.target.wants/snell.service || return 1
         rm -f /etc/systemd/system/snell.service || return 1
         # systemd 未运行（容器、chroot、WSL）时 daemon-reload 会失败，只清理文件。
@@ -1453,3 +1456,4 @@ main() {
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
     main
 fi
+

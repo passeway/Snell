@@ -182,6 +182,25 @@ systemd_running() { return 1; }; check_snell_running() { return 1; }; snell_proc
 check_snell_running() { return 1; }; snell_process_exists() { return 1; }; uninstall_snell''')
         self.assertIn('SYSTEMCTL:reset-failed snell.service', result.stdout)
 
+    def test_uninstall_without_systemd_cleans_service_files_but_preserves_live_process(self):
+        self.binary.write_text('core'); self.server_config(); self.service_files()
+        wants = self.root / 'etc/systemd/system/multi-user.target.wants'
+        wants.mkdir()
+        link = wants / 'snell.service'
+        link.symlink_to('../snell.service')
+        setup = '''systemd_running() { return 1; }
+systemctl() { echo UNEXPECTED_SYSTEMCTL >&2; return 99; }
+'''
+        result = self.run_shell(setup + 'snell_process_exists() { return 0; }; uninstall_snell', expected=1)
+        self.assertNotIn('UNEXPECTED_SYSTEMCTL', result.stderr)
+        self.assertTrue(self.binary.exists()); self.assertTrue(self.server.exists())
+        self.assertTrue(link.is_symlink())
+        result = self.run_shell(setup + 'snell_process_exists() { return 1; }; uninstall_snell')
+        self.assertNotIn('UNEXPECTED_SYSTEMCTL', result.stderr)
+        self.assertFalse(self.binary.exists()); self.assertFalse(self.server.exists())
+        self.assertFalse(link.is_symlink())
+        self.assertFalse((self.root / 'etc/systemd/system/snell.service').exists())
+
     def test_update_without_server_config_points_to_install(self):
         self.binary.write_text('core'); self.service_files()
         result = self.run_shell('check_snell_running() { return 1; }; check_snell_stopped() { :; }; update_snell', expected=1)
@@ -1703,3 +1722,4 @@ check_snell_stopped() { :; }; switch_snell_mode''', '1\n')
 
 if __name__ == '__main__':
     unittest.main()
+
