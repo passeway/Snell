@@ -1175,8 +1175,7 @@ EOF
     # 先生成客户端条目，成功后再统一输出结果，避免失败时已显示“安装成功”。
     client_config=$(refresh_client_config) || return 1
     ports=$(listen_ports)
-    echo -e "${GREEN}🎉Snell 安装成功${ports:+，请在云安全组和系统防火墙中放行 TCP 端口 ${ports}}${RESET}"
-    echo -e "${GREEN}项目地址: https://github.com/passeway/Snell${RESET}"
+    echo -e "${GREEN}🎉Snell 安装成功${ports:+，请在云安全组和系统防火墙中放行 TCP 端口 ${ports}}，项目地址: https://github.com/passeway/Snell${RESET}"
     printf '%s\n' "$client_config"
 }
 
