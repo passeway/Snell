@@ -1672,11 +1672,46 @@ snell_listener_pid() {{ return {0 if healthy else 1}; }}; show_menu''', '0\n')
 get_system_type() {{ echo {system}; }}; clear() {{ :; }}; check_root() {{ :; }}
 check_snell_running() {{ return 1; }}; check_snell_stopped() {{ :; }}
 service_action() {{ [ "$1" = stop ]; }}; systemctl() {{ :; }}; rc-update() {{ :; }}
-main''', '2\n\n0\n')
+main''', '2\ny\n\n0\n')
                     self.assertIn('Snell 卸载成功', result.stdout)
                     self.assertFalse(service.exists())
                     self.assertFalse(self.binary.exists())
                     self.assertFalse(self.server.parent.exists())
+
+    def test_menu_uninstall_requires_explicit_confirmation(self):
+        self.server_config(); self.binary.write_text('installed core'); self.binary.chmod(0o755)
+        for answer in ('\n', 'n\n', 'yes\n', ''):
+            with self.subTest(answer=answer):
+                result = self.run_shell('''check_root() { :; }; clear() { :; }
+uninstall_snell() { echo SHOULD_NOT_RUN; }; main''', '2\n' + answer + '\n0\n')
+                self.assertNotIn('SHOULD_NOT_RUN', result.stdout)
+                if answer:
+                    self.assertIn('已取消卸载', result.stdout)
+        result = self.run_shell('''check_root() { :; }; clear() { :; }
+uninstall_snell() { echo UNINSTALL_CALLED; }; main''', '2\nY\n\n0\n')
+        self.assertIn('UNINSTALL_CALLED', result.stdout)
+
+    def test_menu_status_and_logs_require_installation(self):
+        for system in ('debian', 'alpine'):
+            with self.subTest(system=system):
+                result = self.run_shell(f'''check_root() {{ :; }}; clear() {{ :; }}; get_system_type() {{ echo {system}; }}
+check_snell_installed() {{ return 1; }}; check_snell_running() {{ return 1; }}
+service_action() {{ echo SHOULD_NOT_RUN; }}; systemctl() {{ echo SHOULD_NOT_RUN; }}; show_logs() {{ echo SHOULD_NOT_RUN; }}
+main''', '6\n\n7\n\n0\n')
+                self.assertNotIn('SHOULD_NOT_RUN', result.stdout)
+                self.assertEqual(result.stdout.count('Snell 尚未安装'), 2)
+
+    def test_menu_config_lists_ports_before_client_entries(self):
+        self.server_config(port=40443)
+        result = self.run_shell('''check_root() { :; }; clear() { :; }
+refresh_client_config() { echo 'HK = snell, 203.0.113.1, 40443, psk=x, version=6, mode=unshaped, reuse=true'; }
+main''', '8\n\n0\n')
+        lines = result.stdout.splitlines()
+        hint = next(i for i, line in enumerate(lines) if '请在云安全组和系统防火墙中放行 TCP 端口 40443' in line)
+        self.assertTrue(lines[hint + 1].startswith('HK = snell'))
+        result = self.run_shell('''check_root() { :; }; clear() { :; }
+refresh_client_config() { return 1; }; main''', '8\n\n0\n')
+        self.assertNotIn('放行 TCP 端口', result.stdout)
 
     def test_uninstall_preserves_files_if_process_survives_service_stop(self):
         self.server_config(); self.binary.write_text('installed core')

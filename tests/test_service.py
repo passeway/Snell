@@ -357,7 +357,7 @@ umask 077; install_snell''', expected=1)
             # A missing core must not prevent entry to residual cleanup via
             # the actual menu. Keep both the real unit and manager here.
             Path('/usr/local/bin/snell-server').unlink()
-            uninstalled = self.shell('clear() { :; }; main', '2\n\n0\n')
+            uninstalled = self.shell('clear() { :; }; main', '2\ny\n\n0\n')
             self.assertIn('Snell 卸载成功', uninstalled.stdout)
             self.assertFalse(self.server.parent.exists())
             self.assertFalse(Path('/usr/local/bin/snell-server').exists())

@@ -1431,6 +1431,7 @@ show_menu() {
 trap 'echo -e "${RED}已取消操作${RESET}"; exit 130' INT
 
 main() {
+    local answer client_config ports
     check_root
     if [ "$(get_system_type)" = unknown ]; then
         echo -e "${RED}${UNSUPPORTED_SYSTEM}${RESET}"
@@ -1444,7 +1445,12 @@ main() {
                 install_snell
                 ;;
             2)
-                uninstall_snell
+                # 卸载会删除 PSK 和客户端条目，误按时不能恢复，须明确确认。
+                read -r -p "确定卸载 Snell 并删除配置？[y/N]: " answer || answer=""
+                case "$answer" in
+                    y|Y) uninstall_snell ;;
+                    *) echo -e "${YELLOW}已取消卸载${RESET}" ;;
+                esac
                 ;;
             3)
                 if [ $snell_installed -eq 0 ]; then
@@ -1468,17 +1474,30 @@ main() {
                 fi
                 ;;
             6)
-                if [ "$(get_system_type)" = alpine ]; then
+                if [ $snell_installed -ne 0 ]; then
+                    echo -e "${RED}Snell 尚未安装${RESET}"
+                elif [ "$(get_system_type)" = alpine ]; then
                     service_action status
                 else
                     systemctl status snell --no-pager -l
                 fi
                 ;;
             7)
-                show_logs follow
+                if [ $snell_installed -eq 0 ]; then
+                    show_logs follow
+                else
+                    echo -e "${RED}Snell 尚未安装${RESET}"
+                fi
                 ;;
             8)
-                refresh_client_config
+                # 与安装结果一致，先提示放行端口再输出客户端条目。
+                if client_config=$(refresh_client_config); then
+                    ports=$(listen_ports)
+                    if [ -n "$ports" ]; then
+                        echo -e "${YELLOW}请在云安全组和系统防火墙中放行 TCP 端口 ${ports}${RESET}"
+                    fi
+                    printf '%s\n' "$client_config"
+                fi
                 ;;
             9)
                 change_snell_config
