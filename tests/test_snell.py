@@ -2,6 +2,7 @@
 import os
 import pathlib
 import pty
+import re
 import select
 import shlex
 import signal
@@ -209,9 +210,11 @@ systemctl() { echo UNEXPECTED_SYSTEMCTL >&2; return 99; }
 
     def test_firewall_hint_lists_each_listening_port_once(self):
         self.server_config()
-        self.assertIn('放行 TCP 端口 40443', self.run_shell('print_firewall_hint').stdout)
+        self.assertEqual(self.run_shell('listen_ports').stdout.strip(), '40443')
         self.server.write_text(self.server.read_text().replace('[::]:40443,0.0.0.0:40443', '0.0.0.0:443,[::]:8443'))
-        self.assertIn('放行 TCP 端口 443/8443', self.run_shell('print_firewall_hint').stdout)
+        self.assertEqual(self.run_shell('listen_ports').stdout.strip(), '443/8443')
+        self.server.write_text(self.server.read_text().replace('0.0.0.0:443,[::]:8443', '0.0.0.0:08080,[::]:8080'))
+        self.assertEqual(self.run_shell('listen_ports').stdout.strip(), '8080')
 
     def test_systemd_unit_stops_retrying_after_repeated_failures(self):
         self.run_shell('write_systemd_service')
@@ -722,6 +725,23 @@ replace_snell_binary() { :; }; write_file() { cat >/dev/null; return 1; }
 restart_snell() { echo UNEXPECTED_RESTART; }; update_snell''', expected=1)
         self.assertNotIn('UNEXPECTED_RESTART', result.stdout)
         self.assertNotIn('更新成功', result.stdout)
+
+    def test_install_summary_lists_port_project_and_entry(self):
+        result = self.run_shell('''get_system_type() { echo alpine; }
+install_required_packages() { :; }; replace_snell_binary() { :; }
+choose_port() { echo 32000; }; id() { :; }; rc-update() { :; }; ipv6_available() { return 1; }
+restart_snell() { :; }; refresh_client_config() { echo 'KR = snell, 203.0.113.1, 32000, psk=x'; }; install_snell''')
+        lines = [line for line in re.sub(r'\x1b\[[0-9;]*m', '', result.stdout).splitlines() if line]
+        self.assertEqual(lines[-3:], ['🎉Snell 安装成功，请在云安全组和系统防火墙中放行 TCP 端口 32000',
+                                      '项目地址: https://github.com/passeway/Snell',
+                                      'KR = snell, 203.0.113.1, 32000, psk=x'])
+
+    def test_install_does_not_report_success_when_client_entry_fails(self):
+        result = self.run_shell('''get_system_type() { echo alpine; }
+install_required_packages() { :; }; replace_snell_binary() { :; }
+choose_port() { echo 32000; }; id() { :; }; rc-update() { :; }
+restart_snell() { :; }; refresh_client_config() { return 1; }; install_snell''', expected=1)
+        self.assertNotIn('安装成功', result.stdout)
 
     def test_alpine_install_does_not_create_log_or_cron_job(self):
         result = self.run_shell('''get_system_type() { echo alpine; }
