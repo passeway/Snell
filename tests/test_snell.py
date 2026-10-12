@@ -964,7 +964,9 @@ replace_snell_binary() { echo UNEXPECTED_REPLACE; }; update_snell''', expected=1
                 (default, '')]:
             with self.subTest(route=route, addrs=addrs):
                 self.run_shell('ipv6_available() { :; }; ' + ip(route, addrs) + 'get_public_ipv6', expected=1)
-        self.run_shell('ipv6_available() { return 1; }; ip() { echo UNEXPECTED; }; get_public_ipv6', expected=1)
+        # The same fixture that yields an address above must yield nothing once IPv6 is unavailable.
+        result = self.run_shell('ipv6_available() { return 1; }; ' + ip(default, addresses) + 'get_public_ipv6', expected=1)
+        self.assertEqual(result.stdout, '')
 
     def test_client_ipv6_endpoint_follows_ipv6_listeners(self):
         for listen, public, want in [
@@ -1705,6 +1707,87 @@ echo UPDATED; }}; apt_update_with_retry''')
         self.run_shell(prefix + "echo 'E: Repository signature is invalid' >&2; return 100; }; apt_update_with_retry", expected=100)
         self.assertEqual(len(counter.read_text().splitlines()), 1)
 
+    def menu(self, stubs, data, installed=True, running=True, system='debian'):
+        return self.run_shell(f"""check_root() {{ :; }}; clear() {{ :; }}; get_system_type() {{ echo {system}; }}
+check_snell_installed() {{ return {0 if installed else 1}; }}; check_snell_running() {{ return {0 if running else 1}; }}
+snell_service_transitioning() {{ return 1; }}; snell_binary_version() {{ echo 'snell-server v6.0.0'; }}
+{stubs}
+main""", data)
+
+    def test_menu_dispatches_every_action(self):
+        result = self.menu('install_snell() { echo INSTALL_CALLED; }', '1\n\n0\n', installed=False, running=False)
+        self.assertIn('INSTALL_CALLED', result.stdout)
+        self.assertIn('已退出 Snell 管理工具', result.stdout)
+        result = self.menu('update_snell() { echo UPDATE_CALLED; }', '4\n\n0\n')
+        self.assertIn('UPDATE_CALLED', result.stdout)
+
+    def test_menu_start_stop_follows_state(self):
+        stubs = 'start_snell() { echo START_CALLED; }; stop_snell() { echo STOP_CALLED; }'
+        result = self.menu(stubs, '3\n\n0\n', running=True)
+        self.assertIn('STOP_CALLED', result.stdout); self.assertNotIn('START_CALLED', result.stdout)
+        result = self.menu(stubs, '3\n\n0\n', running=False)
+        self.assertIn('START_CALLED', result.stdout); self.assertNotIn('STOP_CALLED', result.stdout)
+        result = self.menu(stubs, '3\n\n0\n', installed=False, running=False)
+        self.assertNotIn('_CALLED', result.stdout)
+        self.assertIn('Snell 尚未安装', result.stdout)
+
+    def test_menu_restart_reports_only_real_success(self):
+        self.assertIn('Snell 重启成功', self.menu('restart_snell() { :; }', '5\n\n0\n').stdout)
+        self.assertNotIn('Snell 重启成功', self.menu('restart_snell() { return 1; }', '5\n\n0\n').stdout)
+        result = self.menu('restart_snell() { echo SHOULD_NOT_RUN; }', '5\n\n0\n', installed=False, running=False)
+        self.assertNotIn('SHOULD_NOT_RUN', result.stdout)
+        self.assertIn('Snell 尚未安装', result.stdout)
+
+    def test_menu_status_uses_each_service_manager(self):
+        result = self.menu('systemctl() { echo "SYSTEMCTL $*"; }', '6\n\n0\n')
+        self.assertIn('SYSTEMCTL status snell --no-pager -l', result.stdout)
+        result = self.menu('service_action() { echo "SERVICE $*"; }', '6\n\n0\n', system='alpine')
+        self.assertIn('SERVICE status', result.stdout)
+
+    def test_listener_pid_accepts_core_replaced_by_update(self):
+        self.server_config(port=40443)
+        listeners = '\n'.join([
+            'ss() { case "$2" in',
+            "-4) echo 'LISTEN 0 128 0.0.0.0:40443 0.0.0.0:* users:((\"snell-server\",pid=77,fd=3))' ;;",
+            "-6) echo 'LISTEN 0 128 [::]:40443 [::]:* users:((\"snell-server\",pid=77,fd=4))' ;; esac; }",
+            'get_system_type() { echo debian; }; snell_service_pid() { echo 77; }', ''])
+        # After an update replaces the binary, the running core's exe link reads "(deleted)".
+        # The harness relocates /usr/local/bin, so use the relocated core path.
+        for exe in (str(self.binary), str(self.binary) + ' (deleted)'):
+            with self.subTest(exe=exe):
+                result = self.run_shell(listeners + "readlink() { echo '" + exe + "'; }; real_snell_listener_pid")
+                self.assertEqual(result.stdout.strip(), '77')
+        self.run_shell(listeners + 'readlink() { echo /usr/bin/other; }; real_snell_listener_pid', expected=1)
+
+    def test_core_download_url_is_shared_with_ci(self):
+        result = self.run_shell('get_architecture() { echo amd64; }\n'
+                                'wget() { for arg; do case "$arg" in https://*) echo "$arg" ;; esac; done; return 1; }\n'
+                                'snell_download_url amd64; replace_snell_binary', expected=1)
+        url, used = result.stdout.splitlines()[:2]
+        self.assertEqual(url, used)
+        version = re.search(r'^VERSION="([^"]+)"$', SOURCE.read_text(), re.M).group(1)
+        self.assertEqual(url, f'https://dl.nssurge.com/snell/snell-server-{version}-linux-amd64.zip')
+        # CI downloads the core through the same function, so a broken URL fails CI.
+        self.assertIn('snell_download_url "$server_arch"', (SOURCE.parent / '.github/workflows/check.yml').read_text())
+
+    def test_port_in_use_compares_addresses_within_a_family(self):
+        cases = [
+            ('127.0.0.1:200', '10.0.0.5:200', False),
+            ('127.0.0.1:200', '127.0.0.1:200', True),
+            ('127.0.0.1:200', '0.0.0.0:200', True),
+            ('127.0.0.1:200', '[::]:200', False),
+            ('0.0.0.0:300', '10.0.0.5:300', True),
+            ('*:400', '[2001:db8::1]:400', True),
+            ('[::]:500', '[2001:db8::1]:500', True),
+            ('[::]:500', '1.2.3.4:500', False),
+            ('[2001:DB8::1]:600', '[2001:db8::1]:600', True),
+            ('[2001:db8::2]:600', '[2001:db8::1]:600', False),
+            ('0.0.0.0:7000', '0.0.0.0:700', False),
+        ]
+        for bound, endpoint, busy in cases:
+            with self.subTest(bound=bound, endpoint=endpoint):
+                self.run_shell(f"port_in_use 'LISTEN 0 128 {bound} 0.0.0.0:*' '{endpoint}'", expected=0 if busy else 1)
+
     def test_menu_uninstall_requires_explicit_confirmation(self):
         self.server_config(); self.binary.write_text('installed core'); self.binary.chmod(0o755)
         for answer in ('\n', 'n\n', 'yes\n', ''):
@@ -1714,6 +1797,11 @@ uninstall_snell() { echo SHOULD_NOT_RUN; }; main''', '2\n' + answer + '\n0\n')
                 self.assertNotIn('SHOULD_NOT_RUN', result.stdout)
                 if answer:
                     self.assertIn('已取消卸载', result.stdout)
+        # End of input at the prompt cancels as well.
+        result = self.run_shell('''check_root() { :; }; clear() { :; }
+uninstall_snell() { echo SHOULD_NOT_RUN; }; main''', '2\n')
+        self.assertNotIn('SHOULD_NOT_RUN', result.stdout)
+        self.assertIn('已取消卸载', result.stdout)
         result = self.run_shell('''check_root() { :; }; clear() { :; }
 uninstall_snell() { echo UNINSTALL_CALLED; }; main''', '2\nY\n\n0\n')
         self.assertIn('UNINSTALL_CALLED', result.stdout)

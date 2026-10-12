@@ -7,8 +7,8 @@ curl -fsSL https://get.docker.com | bash -s docker
 卸载 Docker
 ```
 sudo systemctl stop docker docker.socket
-sudo apt-get purge -y docker-engine docker docker.io docker-ce docker-ce-cli containerd.io
-sudo apt-get purge -y docker-compose-plugin docker-ce-rootless-extras
+sudo apt-get purge -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin docker-ce-rootless-extras
+# 若使用系统源的 docker.io 安装，改为：sudo apt-get purge -y docker.io
 sudo apt-get autoremove -y --purge
 ```
 

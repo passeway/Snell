@@ -28,6 +28,13 @@ else
 fi
 
 docker exec "$container_name" bash -ec '
+    set -o pipefail
     bash -n Snell.sh
-    PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -v
+    bash -n Snell-docker.sh
+    PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -v 2>&1 | tee /tmp/unittest.log
+    # CI provides real cores and service managers; a skipped class would silently hide those checks.
+    if grep -E "^(OK|FAILED) \(.*skipped=" /tmp/unittest.log; then
+        echo "CI must run every test class, but some were skipped" >&2
+        exit 1
+    fi
 '

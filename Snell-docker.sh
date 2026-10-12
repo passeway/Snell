@@ -82,11 +82,16 @@ install_docker() {
         case "$system" in
             alpine) apk add --no-cache docker-cli-compose ;;
             debian|ubuntu)
+                # docker-compose-plugin 来自 Docker 官方源，docker-compose-v2 来自 Ubuntu，
+                # Debian 13 起的 docker-compose 也提供 v2 插件。
                 apt_update_with_retry && { apt-get install -y docker-compose-plugin ||
-                    apt-get install -y docker-compose-v2; }
+                    apt-get install -y docker-compose-v2 || apt-get install -y docker-compose; }
                 ;;
             *) false ;;
-        esac || { fail "无法安装 Docker Compose 插件"; return 1; }
+        esac && docker compose version >/dev/null 2>&1 || {
+            fail "无法安装 Docker Compose 插件；如使用系统源的 docker.io，请卸载后改用 https://get.docker.com 安装 Docker"
+            return 1
+        }
     fi
     if ! docker info >/dev/null 2>&1; then
         if [ "$system" = alpine ]; then rc-service docker start; else systemctl enable --now docker; fi

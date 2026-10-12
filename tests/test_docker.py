@@ -19,6 +19,8 @@ class DockerInstallerTests(unittest.TestCase):
             'BASE_DIR="/root/snell-docker"', f'BASE_DIR="{self.root}"')
         # The host's own addresses must not leak into exports; IPv6 tests provide fixtures.
         self.code += '\nip() { return 1; }\n'
+        # Port probes must not depend on listeners of the machine running the tests.
+        self.code += '\nss() { :; }\n'
         self.config = self.root / 'snell-conf/snell.conf'
 
     def run_shell(self, body, expected=0):
@@ -31,6 +33,19 @@ class DockerInstallerTests(unittest.TestCase):
         version = re.compile(r'^VERSION="([^"]+)"$', re.M)
         self.assertEqual(version.search(DOCKER_SOURCE.read_text()).group(1),
                          version.search(SOURCE.read_text()).group(1))
+
+    def test_compose_falls_back_to_distribution_packages(self):
+        stubs = ('get_system_type() { echo debian; }; apt_update_with_retry() { :; }\n'
+                 "docker() { case \"$1 $2\" in 'compose version') [ -f \"$BASE_DIR/compose\" ] ;; *) return 0 ;; esac; }\n")
+        # Debian 13's docker-compose package ships the v2 plugin.
+        result = self.run_shell(stubs + "apt-get() { case \"$*\" in 'install -y docker-compose') touch \"$BASE_DIR/compose\" ;; *) return 100 ;; esac; }\n"
+                                'install_docker')
+        self.assertIn('正在安装 Docker Compose 插件', result.stdout)
+        (self.root / 'compose').unlink()
+        # Older distributions only have Compose v1, which does not provide `docker compose`.
+        result = self.run_shell(stubs + "apt-get() { case \"$*\" in 'install -y docker-compose') return 0 ;; *) return 100 ;; esac; }\n"
+                                'install_docker', expected=1)
+        self.assertIn('get.docker.com', result.stderr)
 
     def test_fresh_config_is_v6(self):
         self.run_shell('ipv6_available() { return 1; }; prepare_server_config')

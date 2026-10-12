@@ -163,7 +163,7 @@ The server configuration is readable by `root` and the `snell` group (`640`); th
 
 ## Configuration
 
-Each change under option **9** keeps all other settings. A running service is restarted and checked; a stopped service stays stopped; while the service is starting or stopping, changes are refused until it settles or is stopped with **3**.
+Each change under option **9** keeps the other settings; a port change may also add or remove the IPv6 listener to match current IPv6 availability, and merges several ports on one address into the new port (the script prints a notice when it does). A running service is restarted and checked; a stopped service stays stopped; while the service is starting or stopping, changes are refused until it settles or is stopped with **3**.
 
 ### Port · `9 → 1`
 

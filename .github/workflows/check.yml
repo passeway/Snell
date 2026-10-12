@@ -24,7 +24,7 @@ jobs:
           client_arch=amd64
           if [ "$server_arch" = aarch64 ]; then client_arch=arm64; fi
           mkdir -p "$RUNNER_TEMP/snell-cores"
-          timeout -k 5 180 wget --timeout=15 --tries=3 --waitretry=2 "https://dl.nssurge.com/snell/snell-server-${VERSION}-linux-${server_arch}.zip" -O "$RUNNER_TEMP/snell-cores/snell.zip"
+          timeout -k 5 180 wget --timeout=15 --tries=3 --waitretry=2 "$(snell_download_url "$server_arch")" -O "$RUNNER_TEMP/snell-cores/snell.zip"
           unzip -o "$RUNNER_TEMP/snell-cores/snell.zip" snell-server -d "$RUNNER_TEMP/snell-cores"
           # Pin the independent test client; this does not set the installed Snell version.
           curl -fL --retry 2 --connect-timeout 10 --max-time 180 "https://github.com/SagerNet/sing-box/releases/download/v1.14.2/sing-box-1.14.2-linux-${client_arch}.tar.gz" -o "$RUNNER_TEMP/snell-cores/client.tar.gz"
