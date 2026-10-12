@@ -1691,10 +1691,13 @@ with_snell_lock true''', expected=1)
         prefix = f'''sleep() {{ SECONDS=$((SECONDS + $1)); }}
 apt-get() {{ echo attempt >> '{counter}';
 '''
-        self.run_shell(prefix + f'''if [ "$(wc -l < '{counter}')" -lt 3 ]; then
+        result = self.run_shell(prefix + f'''if [ "$(wc -l < '{counter}')" -lt 3 ]; then
 echo 'E: Could not get lock /var/lib/apt/lists/lock. It is held by process 1' >&2; return 100; fi
 echo UPDATED; }}; apt_update_with_retry''')
         self.assertEqual(len(counter.read_text().splitlines()), 3)
+        # Output is captured to detect lock conflicts, so progress is announced up front.
+        self.assertTrue(result.stdout.startswith('正在更新软件包列表'))
+        self.assertEqual(result.stdout.count('秒后重试'), 2)
         counter.unlink()
         self.run_shell(prefix + "echo 'E: Could not get lock /var/lib/apt/lists/lock' >&2; return 100; }; apt_update_with_retry", expected=100)
         self.assertEqual(len(counter.read_text().splitlines()), 25)
@@ -1823,5 +1826,3 @@ check_snell_stopped() { :; }; switch_snell_mode''', '1\n')
 
 if __name__ == '__main__':
     unittest.main()
-
-

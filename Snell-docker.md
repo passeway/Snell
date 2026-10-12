@@ -62,5 +62,3 @@ cd /root/snell-docker && sudo docker compose restart        # 修改 snell-conf/
 ```
 cd /root/snell-docker && sudo docker compose down --rmi all && sudo rm -rf /root/snell-docker
 ```
-
-

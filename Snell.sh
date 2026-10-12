@@ -36,6 +36,8 @@ get_architecture() {
 # apt-get update uses a separate lists lock; DPkg::Lock::Timeout does not wait for it.
 apt_update_with_retry() {
     local output status deadline=$((SECONDS + 120)) delay
+    # 输出需先暂存以识别锁冲突，先提示进度，避免看起来像卡住。
+    echo "正在更新软件包列表..."
     while true; do
         if output=$(LC_ALL=C apt-get -o DPkg::Lock::Timeout=120 update 2>&1); then
             [ -z "$output" ] || printf '%s\n' "$output"
@@ -48,6 +50,7 @@ apt_update_with_retry() {
         (( SECONDS < deadline )) || return "$status"
         delay=$((deadline - SECONDS))
         (( delay <= 5 )) || delay=5
+        echo "软件包列表正被其他进程占用，${delay} 秒后重试..."
         sleep "$delay" || return 1
     done
 }
@@ -1536,5 +1539,3 @@ main() {
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
     main
 fi
-
-

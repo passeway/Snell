@@ -102,7 +102,7 @@ bash -c 'bash <(curl -fsSL https://snell-ten.vercel.app)'
 
 Installation sets up dependencies, a random port, a 48-character random PSK and the system service, then prints a ready-to-use Surge proxy entry. Run the same command again to open the management menu.
 
-> The installer currently uses the official **v6.0.0rc2** test release with `mode=default`. Your client must support Snell v6 and use the same `mode` as the server. During the beta, the protocol may change incompatibly, so keep both client and server up to date (update the server with option **4**).
+> The installer currently uses the official **v6.0.0rc2** release candidate with `mode=default`. Your client must support Snell v6 and use the same `mode` as the server. Until the final v6 release, the protocol may still change incompatibly, so keep both client and server up to date (update the server with option **4**).
 
 > CentOS support covers the maintained **CentOS Stream 9 / 10** (RHEL-compatible systems such as Rocky and AlmaLinux also install with `dnf`, and **Rocky Linux 8** is verified in CI); CentOS 7 (no `dnf`) is not supported, and end-of-life CentOS 8 is not recommended because its official repositories are offline. With firewalld enabled, allow the port with `firewall-cmd --permanent --add-port=PORT/tcp && firewall-cmd --reload`.
 
@@ -202,6 +202,24 @@ DNS preference only affects the address family the server uses when connecting t
 - The IPv6 entry uses the IPv6 listener's port and the same PSK and mode as the IPv4 entry.
 - When IPv4 and IPv6 use different ports, the IPv4 entry matches the IPv4 listener; if that cannot be determined, the existing entry is kept and the script reports the problem.
 - Public IPv6 access also needs the port allowed in your firewall. v6 relays UDP over TCP, so no extra inbound UDP port is needed.
+
+</details>
+
+<details>
+<summary><strong>Docker deployment</strong></summary>
+
+On Debian, Ubuntu or Alpine with root, a Docker Compose deployment is also available:
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/passeway/Snell/main/Snell-docker.sh)
+```
+
+- Installs Docker and the Compose plugin when missing, builds a local `snell-server` image from the official core (no third-party image) and runs it with host networking.
+- Prints the Surge proxy entry, plus a `-v6` entry when the server has a public IPv6 address. Re-running keeps the existing port and PSK.
+- Files live in `/root/snell-docker/`; the configuration is `snell-conf/snell.conf`.
+- It is managed with `docker compose`, not this menu. Do not run both deployments on the same port.
+
+Common commands and uninstall steps (in Chinese): [Snell-docker.md](Snell-docker.md).
 
 </details>
 
