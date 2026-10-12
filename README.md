@@ -135,13 +135,13 @@ The address, port and PSK above are placeholders. Copy the actual output.
 | Option | Action |
 | :---: | :--- |
 | `1` | Install; after a failed attempt, complete the missing steps while keeping the port, PSK and settings |
-| `2` | Uninstall without further confirmation: stop and verify the service, then remove the core, service and `/etc/snell` (including the PSK); also cleans up residues when the core is missing |
+| `2` | Uninstall after you type `y`: stop and verify the service, then remove the core, service and `/etc/snell` (including the PSK); also cleans up residues when the core is missing |
 | `3` | Start or stop, according to the current state |
 | `4` | Update the core and rewrite the service definition, keeping the running or stopped state |
 | `5` | Restart and check the result |
 | `6` | View service status |
 | `7` | Follow logs on Debian / Ubuntu / CentOS; show troubleshooting steps on Alpine |
-| `8` | Regenerate and display the Surge proxy entry |
+| `8` | Show the TCP port(s) to open, then regenerate and display the Surge proxy entry |
 | `9` | Change configuration: port, mode and DNS |
 | `0` | Exit |
 
