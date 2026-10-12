@@ -464,6 +464,7 @@ replace_snell_binary''', expected=0 if outcome == 'recovered' else 1)
                 self.assertFalse(list(self.binary.parent.glob('.snell-install.*')))
 
     def test_invalid_update_config_fails_before_any_changes(self):
+        self.service_files()
         valid = '[snell-server]\nlisten = 0.0.0.0:40443\npsk = ValidSecret123456\nmode = default\n'
         cases = {
             'missing-file': None,
@@ -476,7 +477,8 @@ replace_snell_binary''', expected=0 if outcome == 'recovered' else 1)
             'ambiguous-edit-section': valid + '[snell-server]\n',
         }
         for listener in ('0.0.0.0:0', '[::]:65536', ':40443', '0.0.0.0', '::1:40443',
-                         '0.0.0.0:40443,', ',0.0.0.0:40443', '0.0.0.0:40443,,[::]:40443'):
+                         '0.0.0.0:40443,', ',0.0.0.0:40443', '0.0.0.0:40443,,[::]:40443',
+                         '999.999.999.999:40443', '[2001:db8:::1]:40443', '[not-ip]:40443'):
             cases[listener] = valid.replace('0.0.0.0:40443', listener)
         self.binary.write_text('original')
         self.client.write_text('existing client')
@@ -494,9 +496,29 @@ write_openrc_service() { echo UNEXPECTED_SERVICE; }
 restart_snell() { echo UNEXPECTED_RESTART; }
 refresh_client_config() { echo UNEXPECTED_CLIENT; }; update_snell''', expected=1)
                 self.assertNotIn('UNEXPECTED', result.stdout)
+                self.assertNotIn('服务文件缺失', result.stderr)
+                self.assertRegex(result.stderr, '配置|PSK|mode|DNS|监听')
                 self.assertEqual(self.binary.read_text(), 'original')
                 self.assertEqual(self.client.read_text(), 'existing client')
                 self.assertEqual(self.server.read_text() if self.server.exists() else None, config)
+
+    def test_listen_ip_validation_matches_literal_address_syntax(self):
+        import ipaddress
+        addresses = ['0.0.0.0', '127.0.0.1', '255.255.255.255', '01.2.3.4',
+                     '256.1.2.3', 'localhost', '::', '::1', '2001:db8::1',
+                     '1:2:3:4:5:6:7:8', '1:2:3:4:5:6:7', '1:2:3:4:5:6:7:8:9',
+                     '::ffff:192.0.2.1', '1:2:3:4:5:6:192.0.2.1',
+                     '::ffff:999.0.0.1', ':::1', '1::2::3', '12345::1',
+                     ':1:2:3:4:5:6:7', '1:2:3:4:5:6:7:', '1:2:3:4:5:6:7:8::',
+                     ':1::2', '1::2:']
+        for address in addresses:
+            with self.subTest(address=address):
+                try:
+                    ipaddress.ip_address(address)
+                    expected = 0
+                except ValueError:
+                    expected = 1
+                self.run_shell('valid_listen_ip ' + shlex.quote(address), expected=expected)
 
     def test_update_preflight_preserves_custom_and_ipv6_only_listeners(self):
         self.service_files()

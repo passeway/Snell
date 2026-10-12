@@ -197,13 +197,16 @@ EOF
 
 # v6 配置原样保留；v5 旧配置（无 mode 字段）迁移为 v6，并保留端口和 PSK。
 prepare_server_config() {
-    local listen port psk
+    local listen port psk status
     mkdir -p "$BASE_DIR/snell-conf" && chmod 700 "$BASE_DIR" "$BASE_DIR/snell-conf" || return 1
     if [ -f "$CONFIG_FILE" ]; then
         if config_value mode >/dev/null; then
             echo "检测到已有 Snell v6 配置，保持不变。"
             chmod 600 "$CONFIG_FILE"
             return
+        else
+            status=$?
+            [ "$status" -eq 1 ] || { fail "已有配置解析失败，保留原文件，请修正后重试"; return 1; }
         fi
         listen=$(config_value listen) || listen=""
         port=${listen%%,*}; port=${port##*:}
@@ -213,13 +216,25 @@ prepare_server_config() {
             write_server_config "$(listen_address "$((10#$port))")" "$psk"
             return
         fi
-        echo -e "${YELLOW}旧配置缺少有效的端口或 PSK，将重新生成。${RESET}"
+        fail "已有配置缺少有效的端口或 PSK，保留原文件，请修正后重试"
+        return 1
     fi
     port=$(choose_port) || return 1
     psk=$(LC_ALL=C tr -dc A-Za-z0-9 < /dev/urandom | head -c 48)
     [ "${#psk}" -eq 48 ] || { fail "生成 PSK 失败"; return 1; }
     write_server_config "$(listen_address "$port")" "$psk"
 }
+
+write_client_config() (
+    local content stage
+    content=$(render_client_config "$@") || return 1
+    umask 077
+    stage=$(mktemp "${CLIENT_FILE}.XXXXXX") || return 1
+    trap 'rm -f "$stage"' EXIT
+    trap 'exit 1' HUP INT TERM
+    printf '%s\n' "$content" > "$stage" && chmod 600 "$stage" &&
+        mv -f "$stage" "$CLIENT_FILE"
+)
 
 write_compose_files() {
     local architecture
@@ -424,7 +439,7 @@ main() {
         address=YOUR_SERVER_IP
         label=Snell
     fi
-    render_client_config "$address" "$label" > "$CLIENT_FILE" && chmod 600 "$CLIENT_FILE" || return 1
+    write_client_config "$address" "$label" || return 1
     port=$(awk -F', *' 'NR == 1 {print $3}' "$CLIENT_FILE")
     echo -e "${GREEN}Snell 容器已启动，Surge 代理条目：${RESET}"
     cat "$CLIENT_FILE"
