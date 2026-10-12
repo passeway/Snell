@@ -102,6 +102,17 @@ bash -c 'bash <(curl -fsSL https://snell-ten.vercel.app)'
 
 Installation sets up dependencies, a random port, a 48-character random PSK and the system service, then prints a ready-to-use Surge proxy entry. Run the same command again to open the management menu.
 
+<details>
+<summary>Alternative: run directly from GitHub</summary>
+
+Use this if `snell-ten.vercel.app` is unreachable. It runs the same `Snell.sh` from the `main` branch.
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/passeway/Snell/main/Snell.sh)
+```
+
+</details>
+
 > The installer currently uses the official **v6.0.0rc2** release candidate with `mode=default`. Your client must support Snell v6 and use the same `mode` as the server. Until the final v6 release, the protocol may still change incompatibly, so keep both client and server up to date (update the server with option **4**).
 
 > CentOS support covers the maintained **CentOS Stream 9 / 10** (RHEL-compatible systems such as Rocky and AlmaLinux also install with `dnf`, and **Rocky Linux 8** is verified in CI); CentOS 7 (no `dnf`) is not supported, and end-of-life CentOS 8 is not recommended because its official repositories are offline. With firewalld enabled, allow the port with `firewall-cmd --permanent --add-port=PORT/tcp && firewall-cmd --reload`.

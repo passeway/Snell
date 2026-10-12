@@ -102,6 +102,17 @@ bash -c 'bash <(curl -fsSL https://snell-ten.vercel.app)'
 
 安装会自动完成依赖、随机端口、48 位随机 PSK 与服务注册，并在最后输出可直接使用的 Surge 代理条目。再次运行同一命令即可打开管理菜单。
 
+<details>
+<summary>备用入口：从 GitHub 直接运行</summary>
+
+`snell-ten.vercel.app` 无法访问时使用，运行的是 `main` 分支上同一个 `Snell.sh`。
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/passeway/Snell/main/Snell.sh)
+```
+
+</details>
+
 > 当前安装官方 **v6.0.0rc2** 候选版（RC），默认 `mode=default`。客户端需支持 Snell v6，且 `mode` 与服务端一致。v6 正式版发布前协议仍可能出现不兼容变更，请让客户端与服务端都保持最新版本（服务端用菜单 **4** 更新）。
 
 > CentOS 支持仍在维护的 **CentOS Stream 9 / 10**（Rocky、AlmaLinux 等 RHEL 兼容系统同样使用 `dnf` 安装，**Rocky Linux 8** 已在 CI 中验证）；不带 `dnf` 的 CentOS 7 不受支持；CentOS 8 已停止维护、官方软件源已下线，不建议使用。启用了 firewalld 时，放行端口可执行 `firewall-cmd --permanent --add-port=端口/tcp && firewall-cmd --reload`。
