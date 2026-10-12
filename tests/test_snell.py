@@ -732,7 +732,7 @@ install_required_packages() { :; }; replace_snell_binary() { :; }
 choose_port() { echo 32000; }; id() { :; }; rc-update() { :; }; ipv6_available() { return 1; }
 restart_snell() { :; }; refresh_client_config() { echo 'KR = snell, 203.0.113.1, 32000, psk=x'; }; install_snell''')
         lines = [line for line in re.sub(r'\x1b\[[0-9;]*m', '', result.stdout).splitlines() if line]
-        self.assertEqual(lines[-3:], ['🎉Snell 安装成功，请在云安全组和系统防火墙中放行 TCP 端口 32000',
+        self.assertEqual(lines[-2:], ['🎉Snell 安装成功，请在云安全组和系统防火墙中放行 TCP 端口 32000，'
                                       '项目地址: https://github.com/passeway/Snell',
                                       'KR = snell, 203.0.113.1, 32000, psk=x'])
 
