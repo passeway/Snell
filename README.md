@@ -145,7 +145,7 @@ The address, port and PSK above are placeholders. Copy the actual output.
 | `9` | Change configuration: port, mode and DNS |
 | `0` | Exit |
 
-If the service manager reports the service running, starting, stopping or restarting after a crash, but the core process or its listeners are unavailable, the menu shows an abnormal state and option **3** offers stop instead of start.
+If the service manager reports the service running, starting, stopping, restarting after a crash or crashed (OpenRC), but the core process or its listeners are unavailable, the menu shows an abnormal state and option **3** offers stop instead of start.
 
 ## Files and configuration
 
