@@ -1188,8 +1188,41 @@ print_firewall_hint() {
 update_snell() { with_snell_lock _update_snell "$@"; }
 
 # 仅做本地预检；不依赖公网地址或客户端导出，也不启动第二个服务进程。
+valid_listen_ip() {
+    local address="$1" part tail compressed=0
+    local -a parts
+    if [[ "$address" != *:* ]]; then
+        [[ "$address" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] || return 1
+        IFS=. read -r -a parts <<< "$address"
+        for part in "${parts[@]}"; do
+            # inet_pton does not accept ambiguous leading-zero octets.
+            [[ "$part" = 0 || "$part" != 0* ]] && (( 10#$part <= 255 )) || return 1
+        done
+        return 0
+    fi
+    if [[ "$address" == *.* ]]; then
+        tail=${address##*:}
+        valid_listen_ip "$tail" || return 1
+        address="${address%:*}:0:0"
+    fi
+    if [[ "$address" == *::* ]]; then
+        [[ "$address" != :* || "$address" == ::* ]] &&
+            [[ "$address" != *: || "$address" == *:: ]] || return 1
+        compressed=1
+        address=${address/::/:}
+        [[ "$address" != *::* ]] || return 1
+        address=${address#:}; address=${address%:}
+    else
+        [[ "$address" != :* && "$address" != *: ]] || return 1
+    fi
+    parts=()
+    if [ -n "$address" ]; then IFS=: read -r -a parts <<< "$address"; fi
+    for part in "${parts[@]}"; do [[ "$part" =~ ^[0-9a-fA-F]{1,4}$ ]] || return 1; done
+    if (( compressed )); then (( ${#parts[@]} < 8 )); else (( ${#parts[@]} == 8 )); fi
+}
+
 preflight_snell_update() {
-    local LC_ALL=C original="$1" listen="$1" new_listen psk mode preference endpoint
+    local LC_ALL=C original="$1" listen="$1" new_listen psk mode preference endpoint host
     local -a endpoints
     psk=$(config_value psk) || {
         fail "服务端配置无效或缺少 listen、psk，已取消更新"; return 1;
@@ -1210,6 +1243,12 @@ preflight_snell_update() {
     for endpoint in "${endpoints[@]}"; do
         [[ "$endpoint" =~ ^(\[[^][,[:space:]]+\]|[^][,:[:space:]]+):([0-9]{1,5})$ ]] &&
             valid_port "${BASH_REMATCH[2]}" || { fail "监听地址或端口无效"; return 1; }
+        host=${endpoint%:*}
+        if [[ "$host" == \[*\] ]]; then
+            host=${host#[}; host=${host%]}
+            [[ "$host" == *:* ]] || { fail "监听 IP 地址无效"; return 1; }
+        fi
+        valid_listen_ip "$host" || { fail "监听 IP 地址无效"; return 1; }
     done
     new_listen=$(auto_listen_for_existing "$original") || { fail "无法生成监听地址"; return 1; }
     if [ "$new_listen" != "$original" ]; then

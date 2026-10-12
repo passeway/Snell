@@ -57,6 +57,37 @@ class DockerInstallerTests(unittest.TestCase):
         self.run_shell('prepare_server_config')
         self.assertEqual(self.config.read_text(), original)
 
+    def test_existing_invalid_config_is_never_regenerated(self):
+        self.config.parent.mkdir()
+        for original in [
+            '[snell-server]\nlisten=0.0.0.0:40443\npsk=OriginalSecret123\nmode=default\nbroken line\n',
+            '[snell-server]\nlisten=0.0.0.0:40443\n',
+            '',
+        ]:
+            with self.subTest(config=original):
+                self.config.write_text(original)
+                result = self.run_shell('choose_port() { echo UNEXPECTED >&2; return 99; }; prepare_server_config', expected=1)
+                self.assertEqual(self.config.read_text(), original)
+                self.assertIn('保留原文件', result.stderr)
+                self.assertNotIn('UNEXPECTED', result.stderr)
+
+    def test_client_export_preserves_previous_file_on_failure(self):
+        self.config.parent.mkdir()
+        self.config.write_text('[snell-server]\nlisten=[::]:40443\npsk=OriginalSecret123\nmode=default\n')
+        client = self.config.with_name('snell.txt')
+        client.write_text('previous working client\n')
+        self.run_shell('write_client_config 203.0.113.9 HK', expected=1)
+        self.assertEqual(client.read_text(), 'previous working client\n')
+        self.config.write_text('[snell-server]\nlisten=0.0.0.0:40443\npsk=OriginalSecret123\nmode=default\n')
+        for failure in ['mv() { return 1; }', 'chmod() { return 1; }',
+                        'printf() { if [ "$2" = "replacement" ]; then return 1; fi; command printf "$@"; }; render_client_config() { echo replacement; }']:
+            self.run_shell(failure + '; write_client_config 203.0.113.9 HK', expected=1)
+            self.assertEqual(client.read_text(), 'previous working client\n')
+            self.assertEqual(list(client.parent.glob('snell.txt.*')), [])
+        self.run_shell('write_client_config 203.0.113.9 HK')
+        self.assertIn('203.0.113.9, 40443', client.read_text())
+        self.assertEqual(client.stat().st_mode & 0o777, 0o600)
+
     def test_client_entry_quotes_psk(self):
         self.config.parent.mkdir(parents=True)
         self.config.write_text('[snell-server]\nlisten = 0.0.0.0:40443, [::]:40443\n'
