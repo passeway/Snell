@@ -441,9 +441,9 @@ main() {
     fi
     write_client_config "$address" "$label" || return 1
     port=$(awk -F', *' 'NR == 1 {print $3}' "$CLIENT_FILE")
-    echo -e "${GREEN}Snell 容器已启动，Surge 代理条目：${RESET}"
-    cat "$CLIENT_FILE"
+    echo -e "${GREEN}🎉Snell 容器已启动，Surge 配置示例：${RESET}"
     echo "请在云安全组和系统防火墙中放行 TCP 端口 ${port}。"
+    cat "$CLIENT_FILE"
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
