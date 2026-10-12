@@ -110,9 +110,36 @@ class DockerInstallerTests(unittest.TestCase):
 
     def test_shared_ipv6_helpers_match_main_installer(self):
         main, docker = SOURCE.read_text(), DOCKER_SOURCE.read_text()
-        for name in ('get_public_ipv6', 'parse_snell_config', 'client_ipv4_port', 'client_ipv6_endpoint'):
+        for name in ('get_public_ipv6', 'parse_snell_config', 'client_ipv4_port', 'client_ipv6_endpoint', 'valid_listen_ip', 'apt_update_with_retry'):
             pattern = re.compile(r'^' + name + r'\(\) \{\n.*?^\}\n', re.M | re.S)
             self.assertEqual(pattern.search(docker).group(0), pattern.search(main).group(0), name)
+
+    def test_invalid_config_never_reaches_container_recreation(self):
+        self.config.parent.mkdir()
+        valid = '[snell-server]\nlisten=0.0.0.0:40443\npsk=OriginalSecret123\nmode=default\n'
+        for config in [valid.replace('mode=default', 'mode=invalid'),
+                       valid.replace('psk=OriginalSecret123\n', ''),
+                       valid.replace('OriginalSecret123', 'short'),
+                       valid.replace('listen=0.0.0.0:40443\n', ''),
+                       valid.replace('0.0.0.0', '999.1.1.1'),
+                       valid.replace('0.0.0.0:40443', '[2001:db8:::1]:40443'),
+                       valid + 'dns-ip-preference=invalid\n']:
+            with self.subTest(config=config):
+                self.config.write_text(config)
+                result = self.run_shell('''check_root() { :; }; get_system_type() { echo debian; }
+install_docker() { :; }; write_compose_files() { echo UNEXPECTED_COMPOSE; return 99; }
+docker() { echo UNEXPECTED_DOCKER; return 99; }; main''', expected=1)
+                self.assertNotIn('UNEXPECTED', result.stdout + result.stderr)
+                self.assertEqual(self.config.read_text(), config)
+
+    def test_valid_config_reaches_container_recreation(self):
+        self.config.parent.mkdir()
+        self.config.write_text('[snell-server]\nlisten=0.0.0.0:40443,[::]:40444\npsk=OriginalSecret123\nmode=default\ndns-ip-preference=prefer-ipv6\n')
+        result = self.run_shell('''check_root() { :; }; get_system_type() { echo debian; }
+install_docker() { :; }; write_compose_files() { :; }
+docker() { echo "DOCKER:$*"; }; wait_container() { :; }
+get_public_ip() { echo 203.0.113.9; }; get_country() { echo HK; }; main''')
+        self.assertIn('DOCKER:compose up -d --build --force-recreate --remove-orphans', result.stdout)
 
     def test_export_matches_address_family_and_explicit_ipv6_binding(self):
         self.config.parent.mkdir()
@@ -168,4 +195,5 @@ class DockerInstallerTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
 

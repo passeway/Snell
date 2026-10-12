@@ -39,6 +39,25 @@ get_architecture() {
 }
 
 # 只补装缺失的 Docker 组件，不升级系统，也不删除已有的 Compose 插件。
+# apt-get update uses a separate lists lock; DPkg::Lock::Timeout does not wait for it.
+apt_update_with_retry() {
+    local output status deadline=$((SECONDS + 120)) delay
+    while true; do
+        if output=$(LC_ALL=C apt-get -o DPkg::Lock::Timeout=120 update 2>&1); then
+            [ -z "$output" ] || printf '%s\n' "$output"
+            return 0
+        else
+            status=$?
+        fi
+        printf '%s\n' "$output" >&2
+        [[ "$output" == *"E: Could not get lock "* ]] || return "$status"
+        (( SECONDS < deadline )) || return "$status"
+        delay=$((deadline - SECONDS))
+        (( delay <= 5 )) || delay=5
+        sleep "$delay" || return 1
+    done
+}
+
 install_docker() {
     local system
     system=$(get_system_type)
@@ -60,7 +79,7 @@ install_docker() {
         case "$system" in
             alpine) apk add --no-cache docker-cli-compose ;;
             debian|ubuntu)
-                apt-get update && { apt-get install -y docker-compose-plugin ||
+                apt_update_with_retry && { apt-get install -y docker-compose-plugin ||
                     apt-get install -y docker-compose-v2; }
                 ;;
             *) false ;;
@@ -181,7 +200,7 @@ parse_snell_config() {
 }
 
 config_value() {
-    parse_snell_config read "$1" "${2:-$CONFIG_FILE}"
+    parse_snell_config read "$1" "${2:-$CONFIG_FILE}" "${3:-}"
 }
 
 write_server_config() {
@@ -235,6 +254,82 @@ write_client_config() (
     printf '%s\n' "$content" > "$stage" && chmod 600 "$stage" &&
         mv -f "$stage" "$CLIENT_FILE"
 )
+
+valid_listen_ip() {
+    local address="$1" part tail compressed=0
+    local -a parts
+    if [[ "$address" != *:* ]]; then
+        [[ "$address" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] || return 1
+        IFS=. read -r -a parts <<< "$address"
+        for part in "${parts[@]}"; do
+            # inet_pton does not accept ambiguous leading-zero octets.
+            [[ "$part" = 0 || "$part" != 0* ]] && (( 10#$part <= 255 )) || return 1
+        done
+        return 0
+    fi
+    if [[ "$address" == *.* ]]; then
+        tail=${address##*:}
+        valid_listen_ip "$tail" || return 1
+        address="${address%:*}:0:0"
+    fi
+    if [[ "$address" == *::* ]]; then
+        [[ "$address" != :* || "$address" == ::* ]] &&
+            [[ "$address" != *: || "$address" == *:: ]] || return 1
+        compressed=1
+        address=${address/::/:}
+        [[ "$address" != *::* ]] || return 1
+        address=${address#:}; address=${address%:}
+    else
+        [[ "$address" != :* && "$address" != *: ]] || return 1
+    fi
+    parts=()
+    if [ -n "$address" ]; then IFS=: read -r -a parts <<< "$address"; fi
+    for part in "${parts[@]}"; do [[ "$part" =~ ^[0-9a-fA-F]{1,4}$ ]] || return 1; done
+    if (( compressed )); then (( ${#parts[@]} < 8 )); else (( ${#parts[@]} == 8 )); fi
+}
+
+config_value_or() {
+    local default="$1" value status
+    shift
+    value=$(config_value "$@") && { printf '%s\n' "$value"; return 0; }
+    status=$?
+    if (( status == 1 )); then printf '%s\n' "$default"; return 0; fi
+    fail "服务端配置格式无效，请检查 $CONFIG_FILE"
+    return 1
+}
+
+validate_server_config() {
+    local LC_ALL=C listen psk mode preference endpoint host
+    local -a endpoints
+    listen=$(config_value listen) || { fail "服务端配置缺少 listen 或格式无效，已取消容器重建"; return 1; }
+    psk=$(config_value psk) || {
+        fail "服务端配置无效或缺少 listen、psk，已取消容器重建"; return 1;
+    }
+    (( ${#psk} >= 12 && ${#psk} <= 255 )) || { fail "服务端 PSK 长度必须为 12-255 字节"; return 1; }
+    mode=$(config_value_or default mode) || return 1
+    case "$mode" in default|unshaped|unsafe-raw) ;; *) fail "服务端 mode 无效"; return 1 ;; esac
+    preference=$(config_value_or default dns-ip-preference "$CONFIG_FILE" ipv-preference) || return 1
+    case "$preference" in
+        default|prefer-ipv4|prefer-ipv6|ipv4-only|ipv6-only) ;;
+        *) fail "服务端 DNS 模式无效"; return 1 ;;
+    esac
+    listen=${listen//[[:space:]]/}
+    [[ -n "$listen" && "$listen" != ,* && "$listen" != *, && "$listen" != *,,* ]] || {
+        fail "监听地址格式无效"; return 1;
+    }
+    IFS=, read -r -a endpoints <<< "$listen"
+    for endpoint in "${endpoints[@]}"; do
+        [[ "$endpoint" =~ ^(\[[^][,[:space:]]+\]|[^][,:[:space:]]+):([0-9]{1,5})$ ]] &&
+            valid_port "${BASH_REMATCH[2]}" || { fail "监听地址或端口无效"; return 1; }
+        host=${endpoint%:*}
+        if [[ "$host" == \[*\] ]]; then
+            host=${host#[}; host=${host%]}
+            [[ "$host" == *:* ]] || { fail "监听 IP 地址无效"; return 1; }
+        fi
+        valid_listen_ip "$host" || { fail "监听 IP 地址无效"; return 1; }
+    done
+    return 0
+}
 
 write_compose_files() {
     local architecture
@@ -421,6 +516,7 @@ main() {
     get_architecture >/dev/null || return 1
     install_docker || return 1
     prepare_server_config || return 1
+    validate_server_config || return 1
     write_compose_files || return 1
 
     echo -e "${GREEN}正在构建并启动 Snell ${VERSION} 容器${RESET}"
@@ -449,4 +545,5 @@ main() {
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
     main "$@"
 fi
+
 

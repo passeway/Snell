@@ -33,6 +33,25 @@ get_architecture() {
     esac
 }
 
+# apt-get update uses a separate lists lock; DPkg::Lock::Timeout does not wait for it.
+apt_update_with_retry() {
+    local output status deadline=$((SECONDS + 120)) delay
+    while true; do
+        if output=$(LC_ALL=C apt-get -o DPkg::Lock::Timeout=120 update 2>&1); then
+            [ -z "$output" ] || printf '%s\n' "$output"
+            return 0
+        else
+            status=$?
+        fi
+        printf '%s\n' "$output" >&2
+        [[ "$output" == *"E: Could not get lock "* ]] || return "$status"
+        (( SECONDS < deadline )) || return "$status"
+        delay=$((deadline - SECONDS))
+        (( delay <= 5 )) || delay=5
+        sleep "$delay" || return 1
+    done
+}
+
 install_required_packages() {
     local system package repair="${1:-}" status name
     local -a packages missing=() installed=()
@@ -89,7 +108,7 @@ install_required_packages() {
     else
         local -a options=()
         [ "$repair" != repair ] || options+=(--reinstall)
-        apt-get -o DPkg::Lock::Timeout=120 update &&
+        apt_update_with_retry &&
             apt-get -o DPkg::Lock::Timeout=120 install -y "${options[@]}" "${missing[@]}"
     fi
 }
@@ -107,7 +126,7 @@ with_snell_lock() (
         case "$(get_system_type)" in
             alpine) apk add --no-cache flock || return 1 ;;
             debian|ubuntu)
-                apt-get -o DPkg::Lock::Timeout=120 update && apt-get -o DPkg::Lock::Timeout=120 install -y util-linux || return 1 ;;
+                apt_update_with_retry && apt-get -o DPkg::Lock::Timeout=120 install -y util-linux || return 1 ;;
             centos) dnf -y install util-linux || return 1 ;;
             *) fail "无法安装操作锁依赖"; return 1 ;;
         esac
@@ -1517,4 +1536,5 @@ main() {
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
     main
 fi
+
 
