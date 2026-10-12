@@ -689,16 +689,21 @@ _switch_snell_mode() {
 change_snell_port() { with_snell_lock _change_snell_port "$@"; }
 
 # 按地址族判断监听冲突：IPv6 地址只与 IPv6 监听冲突，IPv4 同理；
-# ss 显示为 *:端口 的双栈监听与两种地址族都冲突。
+# ss 显示为 *:端口 的双栈监听与两种地址族都冲突。同一地址族内，
+# 通配地址（0.0.0.0、[::]）与任意地址冲突，两个具体地址只在相同时冲突。
 port_in_use() {
-    local listeners="$1" endpoint="$2" family=any
-    case "${endpoint%:*}" in
+    local listeners="$1" endpoint="$2" host family=any
+    host=${endpoint%:*}
+    case "$host" in
         \[*\]) family=6 ;;
         *.*) family=4 ;;
     esac
-    awk -v port="$((10#${endpoint##*:}))" -v family="$family" '
+    awk -v port="$((10#${endpoint##*:}))" -v family="$family" -v host="${host,,}" '
         $4 ~ (":" port "$") {
-            if (family == "any" || $4 ~ /^\*:/ || (family == 6) == ($4 ~ /^\[/)) found=1
+            bound=tolower(substr($4, 1, length($4) - length(port) - 1))
+            if (family == "any" || bound == "*") { found=1; next }
+            if ((family == 6) != (bound ~ /^\[/)) next
+            if (host == "0.0.0.0" || host == "[::]" || bound == "0.0.0.0" || bound == "[::]" || bound == host) found=1
         }
         END { exit !found }
     ' <<< "$listeners"
@@ -876,6 +881,11 @@ show_logs() {
     fi
 }
 
+# 官方内核下载地址；CI 也通过此函数下载，地址写错会直接导致 CI 失败。
+snell_download_url() {
+    printf 'https://dl.nssurge.com/snell/snell-server-%s-linux-%s.zip\n' "$VERSION" "$1"
+}
+
 # 在目标文件所在文件系统暂存，验证成功后原子替换；不创建备份。
 replace_snell_binary() (
     local architecture stage
@@ -885,7 +895,7 @@ replace_snell_binary() (
     trap 'rm -rf "$stage"' EXIT
     trap 'exit 1' HUP INT TERM
     timeout --foreground -k 5 180 wget --timeout=15 --tries=3 --waitretry=2 \
-        "https://dl.nssurge.com/snell/snell-server-${VERSION}-linux-${architecture}.zip" -O "$stage/snell.zip" || {
+        "$(snell_download_url "$architecture")" -O "$stage/snell.zip" || {
         echo -e "${RED}下载 Snell 失败或超时${RESET}"; return 1;
     }
     unzip -o "$stage/snell.zip" snell-server -d "$stage" || {
@@ -1022,7 +1032,8 @@ snell_listener_pid() {
     [[ "$pid" =~ ^[1-9][0-9]*$ ]] || return 1
     executable=$(readlink "/proc/$pid/exe") || return 1
     case "$executable" in
-        /usr/local/bin/snell-server) ;;
+        # 更新替换内核文件后，仍在运行的旧进程显示为 (deleted)。
+        /usr/local/bin/snell-server|'/usr/local/bin/snell-server (deleted)') ;;
         /lib/ld-musl-*.so.1)
             # Alpine 的 gcompat 通过 musl 加载 glibc 内核，exe 指向加载器。
             # 仍须确认该服务进程实际映射并执行了 Snell，不能只认加载器。
