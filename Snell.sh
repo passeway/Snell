@@ -895,6 +895,8 @@ check_snell_installed() {
     [ -f /usr/local/bin/snell-server ] && [ -x /usr/local/bin/snell-server ]
 }
 
+systemd_running() { [ -d /run/systemd/system ]; }
+
 snell_service_file_exists() {
     if [ "$(get_system_type)" = alpine ]; then
         [ -f /etc/init.d/snell ]
@@ -1171,7 +1173,16 @@ EOF
     if [ "$(get_system_type)" != alpine ]; then show_logs recent; fi
     echo -e "${GREEN}Snell 示例配置，项目地址: https://github.com/passeway/Snell${RESET}"
     refresh_client_config || return 1
+    print_firewall_hint
     echo -e "${GREEN}🎉Snell 安装成功${RESET}"
+}
+
+print_firewall_hint() {
+    local listen ports
+    listen=$(config_value listen 2>/dev/null) || return 0
+    # IPv4 与 IPv6 可能使用不同端口，去重后一并提示。
+    ports=$(tr ',' '\n' <<< "${listen//[[:space:]]/}" | sed 's/.*://' | sort -un | paste -sd/ -)
+    [ -z "$ports" ] || echo -e "${YELLOW}请在云安全组和系统防火墙中放行 TCP 端口 ${ports}${RESET}"
 }
 
 update_snell() { with_snell_lock _update_snell "$@"; }
@@ -1224,6 +1235,7 @@ _update_snell() {
         fail "服务正在切换状态或状态异常，请稍后重试更新，或先通过菜单 3 停止服务"
         return 1
     fi
+    [ -f /etc/snell/snell-server.conf ] || { fail "服务端配置不存在，请先通过菜单 1 补全安装"; return 1; }
     listen=$(config_value listen) || { fail "服务端配置无效或缺少 listen，已取消更新"; return 1; }
     snell_service_file_exists || { fail "Snell 服务文件缺失，请先通过菜单 1 补全安装"; return 1; }
     new_listen=$(preflight_snell_update "$listen") || return 1
@@ -1290,9 +1302,9 @@ _uninstall_snell() {
         if (( has_service )); then systemctl disable snell || return 1; fi
         rm -f /etc/systemd/system/multi-user.target.wants/snell.service || return 1
         rm -f /etc/systemd/system/snell.service || return 1
-        # 未发现安装时只清理残留文件；systemd 未运行（容器、chroot）时 daemon-reload 会失败。
-        if (( found )); then
-            systemctl daemon-reload || return 1
+        # systemd 未运行（容器、chroot、WSL）时 daemon-reload 会失败，只清理文件。
+        if systemd_running; then
+            systemctl daemon-reload || { fail "systemd 重新加载失败"; return 1; }
             # 失败状态的服务在单元文件删除后仍会残留，清除后系统不再显示 degraded。
             systemctl reset-failed snell.service 2>/dev/null || true
         fi

@@ -44,7 +44,7 @@ class SnellTests(unittest.TestCase):
         # The host's own addresses must not leak into exports; IPv6 tests provide fixtures.
         self.code += '\nip() { return 1; }\n'
         # Host service managers must never be queried or changed by offline tests.
-        self.code += '\nsystemctl() { [ "$1" = daemon-reload ] || return 99; }; rc-service() { return 99; }; rc-update() { return 99; }; journalctl() { return 99; }\n'
+        self.code += '\nsystemd_running() { :; }\nsystemctl() { [ "$1" = daemon-reload ] || return 99; }; rc-service() { return 99; }; rc-update() { return 99; }; journalctl() { return 99; }\n'
         # Keep download fixtures as shell functions; timeout itself is exercised separately.
         self.code += '\ntimeout() { [ "$1" != --foreground ] || shift; [ "$1" != -k ] || shift 2; shift; "$@"; }\n'
         self.code += '\neval "$(declare -f snell_listener_pid | sed \'1s/snell_listener_pid/real_snell_listener_pid/\')"\nsnell_listener_pid() { echo 123; }\n'
@@ -167,8 +167,32 @@ SNELL_RESTORING=1; trap '' HUP INT TERM; write_file '{target}' 600 root:root <<<
     def test_uninstall_without_installation_skips_systemd_when_not_running(self):
         self.server.parent.rmdir()
         result = self.run_shell('''systemctl() { echo "System has not been booted with systemd" >&2; return 1; }
-check_snell_running() { return 1; }; snell_process_exists() { return 1; }; uninstall_snell''')
+systemd_running() { return 1; }; check_snell_running() { return 1; }; snell_process_exists() { return 1; }; uninstall_snell''')
         self.assertIn('残留文件已清理', result.stdout)
+        # Leftover files without systemd running are still removed instead of aborting.
+        self.binary.write_text('core')
+        result = self.run_shell('''systemctl() { echo "System has not been booted with systemd" >&2; return 1; }
+systemd_running() { return 1; }; check_snell_running() { return 1; }; snell_process_exists() { return 1; }; uninstall_snell''')
+        self.assertIn('Snell 卸载成功', result.stdout)
+        self.assertFalse(self.binary.exists())
+
+    def test_uninstall_clears_stale_failed_unit_without_files(self):
+        self.server.parent.rmdir()
+        result = self.run_shell('''systemctl() { echo "SYSTEMCTL:$*"; }
+check_snell_running() { return 1; }; snell_process_exists() { return 1; }; uninstall_snell''')
+        self.assertIn('SYSTEMCTL:reset-failed snell.service', result.stdout)
+
+    def test_update_without_server_config_points_to_install(self):
+        self.binary.write_text('core'); self.service_files()
+        result = self.run_shell('check_snell_running() { return 1; }; check_snell_stopped() { :; }; update_snell', expected=1)
+        self.assertIn('服务端配置不存在，请先通过菜单 1 补全安装', result.stderr)
+        self.assertNotIn('awk', result.stderr)
+
+    def test_firewall_hint_lists_each_listening_port_once(self):
+        self.server_config()
+        self.assertIn('放行 TCP 端口 40443', self.run_shell('print_firewall_hint').stdout)
+        self.server.write_text(self.server.read_text().replace('[::]:40443,0.0.0.0:40443', '0.0.0.0:443,[::]:8443'))
+        self.assertIn('放行 TCP 端口 443/8443', self.run_shell('print_firewall_hint').stdout)
 
     def test_systemd_unit_stops_retrying_after_repeated_failures(self):
         self.run_shell('write_systemd_service')
