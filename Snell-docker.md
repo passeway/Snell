@@ -60,7 +60,7 @@ cd /root/snell-docker && sudo docker compose restart        # 修改 snell-conf/
 ```
 卸载 Snell
 ```
-cd /root/snell-docker && sudo docker compose down --rmi local
-sudo rm -rf /root/snell-docker
+cd /root/snell-docker && sudo docker compose down --rmi all && sudo rm -rf /root/snell-docker
 ```
+
 

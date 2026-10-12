@@ -1684,7 +1684,23 @@ main''', '2\ny\n\n0\n')
 command() { [ "$2" != flock ] && builtin command "$@"; }
 apt-get() { echo "apt-get $*"; return 1; }
 with_snell_lock true''', expected=1)
-        self.assertEqual(result.stdout.splitlines(), ['apt-get -o DPkg::Lock::Timeout=120 update'])
+        self.assertEqual(result.stderr.splitlines(), ['apt-get -o DPkg::Lock::Timeout=120 update'])
+
+    def test_apt_update_retries_only_lock_conflicts_with_a_deadline(self):
+        counter = self.root / 'apt-attempts'
+        prefix = f'''sleep() {{ SECONDS=$((SECONDS + $1)); }}
+apt-get() {{ echo attempt >> '{counter}';
+'''
+        self.run_shell(prefix + f'''if [ "$(wc -l < '{counter}')" -lt 3 ]; then
+echo 'E: Could not get lock /var/lib/apt/lists/lock. It is held by process 1' >&2; return 100; fi
+echo UPDATED; }}; apt_update_with_retry''')
+        self.assertEqual(len(counter.read_text().splitlines()), 3)
+        counter.unlink()
+        self.run_shell(prefix + "echo 'E: Could not get lock /var/lib/apt/lists/lock' >&2; return 100; }; apt_update_with_retry", expected=100)
+        self.assertEqual(len(counter.read_text().splitlines()), 25)
+        counter.unlink()
+        self.run_shell(prefix + "echo 'E: Repository signature is invalid' >&2; return 100; }; apt_update_with_retry", expected=100)
+        self.assertEqual(len(counter.read_text().splitlines()), 1)
 
     def test_menu_uninstall_requires_explicit_confirmation(self):
         self.server_config(); self.binary.write_text('installed core'); self.binary.chmod(0o755)
@@ -1807,4 +1823,5 @@ check_snell_stopped() { :; }; switch_snell_mode''', '1\n')
 
 if __name__ == '__main__':
     unittest.main()
+
 
