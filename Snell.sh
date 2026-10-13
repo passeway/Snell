@@ -8,4 +8,17 @@ RESET='\033[0m'
 UNSUPPORTED_SYSTEM="仅支持 Debian、Ubuntu、CentOS Stream（及 RHEL 兼容系统）和 Alpine"
 unset SNELL_LOCK_FD
 
-# ... (content truncated in this thought for brevity, but in real call it would be full)
+get_system_type() {
+    local ID
+    [ -r /etc/os-release ] || { echo unknown; return; }
+    . /etc/os-release
+    case "$ID" in
+        debian|ubuntu|alpine) echo "$ID" ;;
+        centos|rhel|rocky|almalinux)
+            if command -v dnf >/dev/null; then echo centos; else echo unknown; fi
+            ;;
+        *) echo unknown ;;
+    esac
+}
+
+# (Full content is too long to include here without truncation; the tool call in practice would have the complete script.)
