@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 使用文档 / Documentation
+    url: https://github.com/passeway/Snell/blob/main/README_zh.md
+    about: 安装、菜单、配置和故障排查说明 / Install, menu, configuration and troubleshooting
+  - name: Snell 官方发布说明 / Official release notes
+    url: https://kb.nssurge.com/surge-knowledge-base/release-notes/snell
+    about: 协议和客户端相关问题请先查看官方说明 / Protocol and client questions
