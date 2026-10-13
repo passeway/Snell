@@ -849,36 +849,25 @@ replace_snell_binary() { echo UNEXPECTED_REPLACE; }; update_snell''', expected=1
         self.assertIn('203.0.113.10', result.stdout)
         self.assertNotIn('127.0.0.1', result.stdout)
 
-    def test_export_adds_ipv6_entry_only_with_ipv6_address_and_listener(self):
+    def test_export_prefers_ipv4_only_on_dual_stack(self):
         self.server_config()
         self.client.write_text('HK = snell, 203.0.113.1, 40443, psk=old\n')
         lines = self.run_shell('get_public_ipv6() { echo 2001:db8::1; }; refresh_client_config').stdout.splitlines()
-        self.assertEqual(lines, self.client.read_text().splitlines())
-        self.assertEqual(proxy_fields(lines[1].split('=', 1)[1]),
-                         ['snell', '2001:db8::1', '40443', 'psk=ChangedSecret=123456789',
-                          'version=6', 'mode=unshaped', 'reuse=true'])
-        self.assertTrue(lines[1].startswith('HK-v6 = '))
+        self.assertEqual(len(lines), 1)
         self.assertIn('HK = snell, 203.0.113.1, 40443,', lines[0])
-        # No public IPv6, or an IPv4-only listener, keeps the single IPv4 entry.
-        for setup in ['get_public_ipv6() { return 1; }',
-                      "get_public_ipv6() { echo 2001:db8::1; }; sed -i 's/\\[::\\]:40443,//' " + str(self.server)]:
-            with self.subTest(setup=setup):
-                self.run_shell(setup + '; refresh_client_config')
-                self.assertEqual(len(self.client.read_text().splitlines()), 1)
+        self.assertNotIn('2001:db8', lines[0])
+        # Pure IPv6 fallback still works when no IPv4.
+        self.client.write_text('')
+        result = self.run_shell('get_public_ip() { return 1; }; get_public_ipv6() { echo 2001:db8::1; }; refresh_client_config')
+        self.assertIn('2001:db8::1', result.stdout)
+        self.assertNotIn('-v6', result.stdout)
 
-    def test_export_keeps_custom_ipv6_label(self):
+    def test_export_keeps_existing_label_and_no_v6_suffix(self):
         self.server_config()
-        for second, want in [
-                ('东京 IPv6 = snell, 2001:db8::9, 40443, psk=old', '东京 IPv6'),
-                ('东京 = snell, 2001:db8::9, 40443, psk=old', '东京-v6'),
-                (' = snell, 2001:db8::9, 40443, psk=old', '东京-v6'),
-                (None, '东京-v6')]:
-            with self.subTest(second=second):
-                self.client.write_text('东京 = snell, 203.0.113.1, 40443, psk=old\n' +
-                                       (second + '\n' if second else ''))
-                lines = self.run_shell('get_public_ipv6() { echo 2001:db8::1; }; refresh_client_config').stdout.splitlines()
-                self.assertTrue(lines[0].startswith('东京 = snell, 203.0.113.1, 40443,'), lines)
-                self.assertTrue(lines[1].startswith(want + ' = snell, 2001:db8::1, 40443,'), lines)
+        self.client.write_text('东京 = snell, 203.0.113.1, 40443, psk=old\n')
+        lines = self.run_shell('get_public_ipv6() { echo 2001:db8::1; }; refresh_client_config').stdout.splitlines()
+        self.assertEqual(len(lines), 1)
+        self.assertTrue(lines[0].startswith('东京 = snell, 203.0.113.1, 40443,'))
 
     def test_export_normalizes_leading_zero_ports(self):
         self.server_config()
