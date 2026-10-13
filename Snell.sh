@@ -412,7 +412,7 @@ render_client_config() {
         label=$(awk -F= 'NR==1 { gsub(/^[[:space:]]+|[[:space:]]+$/, "", $1); print $1 }' /etc/snell/snell-client.conf)
     fi
 
-    # Dual-stack exports IPv4 only. Pure IPv6 exports IPv6 only (no -v6 suffix).
+    # 双栈只导出 IPv4；纯 IPv6 只导出 IPv6（节点名不加 -v6）。
     local ipv4_ok=0
     if valid_ipv4 "$address"; then
         ipv4_ok=1
@@ -430,8 +430,7 @@ render_client_config() {
         return 0
     fi
 
-    # 仅当没有可用 IPv4 时，才输出 IPv6 配置（纯单栈 IPv6 场景）。
-    # 节点名不加 -v6。
+    # 没有可用 IPv4 时（纯 IPv6 单栈）才输出 IPv6 配置。
     if endpoint=$(client_ipv6_endpoint "$listen"); then
         address=${endpoint% *}; port=${endpoint#* }
         if [ -z "$label" ] || [[ "$label" == *,* || "$label" == *$'\n'* ]]; then
