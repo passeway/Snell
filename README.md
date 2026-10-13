@@ -14,9 +14,52 @@
 
 **English** · [简体中文](README_zh.md)
 
-[Why v6](#why-snell-v6) · [Quick start](#quick-start) · [Connect with Surge](#connect-with-surge) · [Management menu](#management-menu) · [Configuration](#configuration) · [Advanced](#advanced)
+[Quick start](#quick-start) · [Why v6](#why-snell-v6) · [Connect with Surge](#connect-with-surge) · [Management menu](#management-menu) · [Configuration](#configuration) · [Advanced](#advanced)
 
 </div>
+
+---
+
+## Quick start
+
+Run as **root**. No domain or certificate is required.
+
+```bash
+# Debian / Ubuntu / CentOS
+bash <(curl -fsSL https://snell-ten.vercel.app)
+```
+
+```sh
+# Alpine
+apk add --no-cache bash curl ca-certificates
+bash -c 'bash <(curl -fsSL https://snell-ten.vercel.app)'
+```
+
+**① Choose `1` to install → ② Allow the printed TCP port in your security group and firewall → ③ Import the proxy entry into Surge**
+
+Installation sets up dependencies, a random port, a 48-character random PSK and the system service, then prints a ready-to-use Surge proxy entry. Run the same command again to open the management menu.
+
+<details>
+<summary>Alternative: run directly from GitHub</summary>
+
+Use this if `snell-ten.vercel.app` is unreachable. It runs the same `Snell.sh` from the `main` branch.
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/passeway/Snell/main/Snell.sh)
+```
+
+</details>
+
+> The installer currently uses the official **v6.0.0rc2** release candidate with `mode=default`. Your client must support Snell v6 and use the same `mode` as the server. Until the final v6 release, the protocol may still change incompatibly, so keep both client and server up to date (update the server with option **4**).
+
+> CentOS support covers the maintained **CentOS Stream 9 / 10** (RHEL-compatible systems such as Rocky and AlmaLinux also install with `dnf`, and **Rocky Linux 8** is verified in CI); CentOS 7 (no `dnf`) is not supported, and end-of-life CentOS 8 is not recommended because its official repositories are offline. With firewalld enabled, allow the port with `firewall-cmd --permanent --add-port=PORT/tcp && firewall-cmd --reload`.
+
+### What the installer does
+
+- **Several systems, one experience**: systemd on Debian / Ubuntu / CentOS, OpenRC on Alpine, on AMD64 and ARM64.
+- **Automatic dual stack**: listens on `0.0.0.0:PORT,[::]:PORT` when IPv6 is available and exports an extra IPv6 entry when a public IPv6 address is found.
+- **Verified outcomes**: after a start or restart it checks the real core process and its listening ports, not just the service manager's state.
+- **Safe changes**: failed or interrupted configuration changes restore the previous configuration; updates keep the running or stopped state; only one management operation runs at a time.
 
 ---
 
@@ -80,49 +123,6 @@ v4 added controlled random perturbations to the AES stream and worked well for f
 </details>
 
 Read [Inside Snell v6](https://nssurge.com/blog/snell-v6/) and the [official release notes](https://kb.nssurge.com/surge-knowledge-base/release-notes/snell) for the design details.
-
----
-
-## Quick start
-
-Run as **root**. No domain or certificate is required.
-
-```bash
-# Debian / Ubuntu / CentOS
-bash <(curl -fsSL https://snell-ten.vercel.app)
-```
-
-```sh
-# Alpine
-apk add --no-cache bash curl ca-certificates
-bash -c 'bash <(curl -fsSL https://snell-ten.vercel.app)'
-```
-
-**① Choose `1` to install → ② Allow the printed TCP port in your security group and firewall → ③ Import the proxy entry into Surge**
-
-Installation sets up dependencies, a random port, a 48-character random PSK and the system service, then prints a ready-to-use Surge proxy entry. Run the same command again to open the management menu.
-
-<details>
-<summary>Alternative: run directly from GitHub</summary>
-
-Use this if `snell-ten.vercel.app` is unreachable. It runs the same `Snell.sh` from the `main` branch.
-
-```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/passeway/Snell/main/Snell.sh)
-```
-
-</details>
-
-> The installer currently uses the official **v6.0.0rc2** release candidate with `mode=default`. Your client must support Snell v6 and use the same `mode` as the server. Until the final v6 release, the protocol may still change incompatibly, so keep both client and server up to date (update the server with option **4**).
-
-> CentOS support covers the maintained **CentOS Stream 9 / 10** (RHEL-compatible systems such as Rocky and AlmaLinux also install with `dnf`, and **Rocky Linux 8** is verified in CI); CentOS 7 (no `dnf`) is not supported, and end-of-life CentOS 8 is not recommended because its official repositories are offline. With firewalld enabled, allow the port with `firewall-cmd --permanent --add-port=PORT/tcp && firewall-cmd --reload`.
-
-### What the installer does
-
-- **Several systems, one experience**: systemd on Debian / Ubuntu / CentOS, OpenRC on Alpine, on AMD64 and ARM64.
-- **Automatic dual stack**: listens on `0.0.0.0:PORT,[::]:PORT` when IPv6 is available and exports an extra IPv6 entry when a public IPv6 address is found.
-- **Verified outcomes**: after a start or restart it checks the real core process and its listening ports, not just the service manager's state.
-- **Safe changes**: failed or interrupted configuration changes restore the previous configuration; updates keep the running or stopped state; only one management operation runs at a time.
 
 ---
 
