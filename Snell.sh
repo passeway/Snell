@@ -386,7 +386,7 @@ surge_value() {
 }
 
 render_client_config() {
-    local LC_ALL=C listen port psk mode server_config endpoint address="" label="" label6=""
+    local LC_ALL=C listen port psk mode server_config endpoint address="" label=""
     local -a endpoints
     [ -f /etc/snell/snell-server.conf ] || { fail "服务端配置不存在"; return 1; }
     if [ "$#" -gt 0 ]; then server_config="$1"; else
