@@ -412,7 +412,7 @@ render_client_config() {
         label=$(awk -F= 'NR==1 { gsub(/^[[:space:]]+|[[:space:]]+$/, "", $1); print $1 }' /etc/snell/snell-client.conf)
     fi
 
-    # 双栈时优先只导出 IPv4；仅纯 IPv6 环境才导出 IPv6（节点名不加 -v6）。
+    # Dual-stack: export IPv4 only; pure IPv6: export IPv6 (no -v6 suffix).
     local ipv4_ok=0
     if valid_ipv4 "$address"; then
         ipv4_ok=1
