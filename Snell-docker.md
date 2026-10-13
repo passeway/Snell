@@ -48,7 +48,7 @@ sudo docker compose version    # compose版本
 ```
 bash <(curl -fsSL https://raw.githubusercontent.com/passeway/Snell/main/Snell-docker.sh)
 ```
-脚本在本地用官方内核构建 `snell-server` 镜像，以 host 网络运行，并输出 Surge 代理条目；服务器有公网 IPv6 时额外输出一条 `-v6` 节点。
+脚本在本地用官方内核构建 `snell-server` 镜像，以 host 网络运行，并输出一条 Surge 代理条目：双栈输出 IPv4，纯 IPv6 输出 IPv6。
 重复运行会保留已有 v6 配置；旧版 v5 配置会迁移为 v6，并保留原端口和 PSK。
 已有配置无法解析或缺少必要字段时，脚本会停止并保留原文件，不会重新生成端口和 PSK。客户端条目验证成功后才替换 `snell.txt`，导出失败时保留上一次的内容。
 

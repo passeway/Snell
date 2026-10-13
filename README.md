@@ -57,7 +57,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/passeway/Snell/main/Snell.sh
 ### What the installer does
 
 - **Several systems, one experience**: systemd on Debian / Ubuntu / CentOS, OpenRC on Alpine, on AMD64 and ARM64.
-- **Automatic dual stack**: listens on `0.0.0.0:PORT,[::]:PORT` when IPv6 is available and exports an extra IPv6 entry when a public IPv6 address is found.
+- **Automatic dual stack**: listens on `0.0.0.0:PORT,[::]:PORT` when IPv6 is available and exports one entry: IPv4 on dual-stack servers, IPv6 on IPv6-only servers.
 - **Verified outcomes**: after a start or restart it checks the real core process and its listening ports, not just the service manager's state.
 - **Safe changes**: failed or interrupted configuration changes restore the previous configuration; updates keep the running or stopped state; only one management operation runs at a time.
 
@@ -137,7 +137,7 @@ My-Snell = snell, YOUR_SERVER_IP, YOUR_PORT, psk=YOUR_PSK, version=6, mode=defau
 
 The address, port and PSK above are placeholders. Copy the actual output.
 
-- **Export again**: option **8** reads the current port, PSK and mode, and keeps the existing address and node names (including a renamed IPv6 entry).
+- **Export again**: option **8** reads the current port, PSK and mode, and keeps the existing address and node name.
 - **After editing the server configuration by hand**: restart with **5**, then export with **8**.
 - **PSK with spaces, commas or quotes**: copy the complete entry, including its quotes and escapes.
 
@@ -203,15 +203,18 @@ DNS preference only affects the address family the server uses when connecting t
 ## Advanced
 
 <details>
-<summary><strong>IPv4 / IPv6 dual stack and the IPv6 entry</strong></summary>
+<summary><strong>IPv4 / IPv6 dual stack and which entry is exported</strong></summary>
 
 - With the IPv6 stack enabled and an IPv6 address present, the installer listens on `0.0.0.0:PORT,[::]:PORT`; otherwise on IPv4 only. Option **4** checks again on update; manually bound addresses are preserved.
-- When Snell listens on IPv6 and is reachable from outside, an extra entry with a `-v6` suffix is exported alongside the IPv4 entry:
+- Only one entry is exported, without a `-v6` suffix:
+  - **Dual stack**: the IPv4 entry only.
+  - **IPv6-only** (no IPv4 default route): the IPv6 entry, with no IPv4 lookup or prompt.
+  - If the public IPv4 cannot be detected and the prompt is left blank, the IPv6 entry is exported instead and the script says so.
+- The IPv6 address comes from the listener:
   - with `[::]`, it uses the public address on the interface of the default IPv6 route, skipping outbound-only tunnels such as WARP;
   - with a specific public IPv6 bind, it uses that address;
   - loopback, link-local and private binds are not exported.
-- The IPv6 entry uses the IPv6 listener's port and the same PSK and mode as the IPv4 entry.
-- When IPv4 and IPv6 use different ports, the IPv4 entry matches the IPv4 listener; if that cannot be determined, the existing entry is kept and the script reports the problem.
+- Each entry uses the port of its own address family's listener. When the IPv4 port cannot be determined, the existing entry is kept and the script reports the problem.
 - Public IPv6 access also needs the port allowed in your firewall. v6 relays UDP over TCP, so no extra inbound UDP port is needed.
 
 </details>
@@ -226,7 +229,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/passeway/Snell/main/Snell-do
 ```
 
 - Installs Docker and the Compose plugin when missing, builds a local `snell-server` image from the official core (no third-party image) and runs it with host networking.
-- Prints the Surge proxy entry, plus a `-v6` entry when the server has a public IPv6 address. Re-running keeps the existing port and PSK.
+- Prints one Surge proxy entry: IPv4 on dual-stack servers, IPv6 on IPv6-only servers. Re-running keeps the existing port and PSK.
 - Files live in `/root/snell-docker/`; the configuration is `snell-conf/snell.conf`.
 - It is managed with `docker compose`, not this menu. Do not run both deployments on the same port.
 
@@ -263,7 +266,7 @@ rc-service snell status
 
 - **Alpine logs**: Snell logs are not saved and no log rotation or scheduled task is configured. For temporary diagnostics, run `rc-service snell stop`, then `/usr/local/bin/snell-server -l info -c /etc/snell/snell-server.conf` to see output in the terminal; press `Ctrl+C` when done and run `rc-service snell start`.
 - **Live logs**: on Debian / Ubuntu / CentOS, press `Ctrl+C` in option **7** to return to the menu.
-- **Public IPv4 lookup fails**: enter it manually, or cancel and retry with option **8**. If the country lookup fails, the node name defaults to `Snell`.
+- **Public IPv4 lookup fails**: enter it manually, or leave it blank to export the IPv6 entry when one is available; retry later with option **8**. If the country lookup fails, the node name defaults to `Snell`.
 - **Uninstall blocked**: if the service cannot be confirmed stopped, or a foreground Snell process is still running, uninstall keeps all files; stop it first and retry.
 - **Reporting a bug**: include your OS, architecture, server and client versions, and relevant logs. Redact the PSK.
 

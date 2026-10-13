@@ -259,7 +259,7 @@ get_public_ip() {
         fi
     done
     echo "自动获取公网 IPv4 失败，请填写客户端连接地址。" >&2
-    while read -r -p "公网 IPv4（留空取消）: " address; do
+    while read -r -p "公网 IPv4（留空跳过）: " address; do
         [ -n "$address" ] || return 1
         if valid_ipv4 "$address"; then
             # 去掉前导零，避免客户端按八进制解析。
@@ -412,37 +412,30 @@ render_client_config() {
         label=$(awk -F= 'NR==1 { gsub(/^[[:space:]]+|[[:space:]]+$/, "", $1); print $1 }' /etc/snell/snell-client.conf)
     fi
 
-    # 双栈只导出 IPv4；纯 IPv6 只导出 IPv6（节点名不加 -v6）。
-    local ipv4_ok=0
-    if valid_ipv4 "$address"; then
-        ipv4_ok=1
+    # 只导出一条节点：有公网 IPv4 时只导出 IPv4（双栈也一样），纯 IPv6 时只导出 IPv6。
+    # 没有 IPv4 默认路由时直接按纯 IPv6 处理，不查询 IPv4，也不提示填写。
+    local family=4
+    if valid_ipv4 "$address"; then :
+    elif ipv4_route_available && address=$(get_public_ip); then :
+    elif endpoint=$(client_ipv6_endpoint "$listen"); then
+        family=6
+        if ipv4_route_available; then
+            echo -e "${YELLOW}未获取到公网 IPv4，本次导出 IPv6 节点。${RESET}" >&2
+        fi
     else
-        address=$(get_public_ip) && ipv4_ok=1 || address=""
+        fail "无法获取公网 IPv4，服务也没有可用的公网 IPv6 监听"
+        return 1
     fi
-
-    if (( ipv4_ok )); then
+    if (( family == 4 )); then
         port=$(client_ipv4_port "$listen" "$address") || return 1
-        if [ -z "$label" ] || [[ "$label" == *,* || "$label" == *$'\n'* ]]; then
-            label=$(get_country "$address")
-        fi
-        printf '%s = snell, %s, %s, psk=%s, version=6, mode=%s, reuse=true\n' \
-            "$label" "$address" "$port" "$(surge_value "$psk")" "$mode"
-        return 0
-    fi
-
-    # 没有可用 IPv4 时（纯 IPv6 单栈）才输出 IPv6 配置。
-    if endpoint=$(client_ipv6_endpoint "$listen"); then
+    else
         address=${endpoint% *}; port=${endpoint#* }
-        if [ -z "$label" ] || [[ "$label" == *,* || "$label" == *$'\n'* ]]; then
-            label=$(get_country "$address" 2>/dev/null || echo Snell)
-        fi
-        printf '%s = snell, %s, %s, psk=%s, version=6, mode=%s, reuse=true\n' \
-            "$label" "$address" "$port" "$(surge_value "$psk")" "$mode"
-        return 0
     fi
-
-    fail "无法获取可用的公网 IPv4 或 IPv6 地址"
-    return 1
+    if [ -z "$label" ] || [[ "$label" == *,* || "$label" == *$'\n'* ]]; then
+        label=$(get_country "$address")
+    fi
+    printf '%s = snell, %s, %s, psk=%s, version=6, mode=%s, reuse=true\n' \
+        "$label" "$address" "$port" "$(surge_value "$psk")" "$mode"
 }
 
 refresh_client_config() { with_snell_lock _refresh_client_config; }
@@ -511,6 +504,13 @@ client_ipv6_endpoint() {
     fi
     (( ${#specifics[@]} == 1 )) || return 1
     printf '%s\n' "${specifics[0]}"
+}
+
+# 主路由表没有 IPv4 默认路由时视为纯 IPv6 服务器；无法读取路由时按有 IPv4 处理。
+ipv4_route_available() {
+    local routes
+    routes=$(ip -4 route show default 2>/dev/null) || return 0
+    [ -n "$routes" ]
 }
 
 ipv6_available() {
@@ -1598,4 +1598,3 @@ main() {
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
     main
 fi
-
