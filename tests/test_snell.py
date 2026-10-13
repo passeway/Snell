@@ -448,6 +448,72 @@ update_snell''', expected=1)
         self.assertIn('新程序已替换，但重启失败', result.stdout)
         self.assertNotIn('更新成功', result.stdout)
 
+    def update_with_real_replace(self, body, running=True, expected=0):
+        """Run update_snell with the real binary replacement and a fake download."""
+        self.service_files()
+        self.binary.write_text('old-core')
+        self.server_config()
+        return self.run_shell(f'''check_snell_running() {{ return {0 if running else 1}; }}
+check_snell_stopped() {{ return {1 if running else 0}; }}; ipv6_available() {{ :; }}
+install_required_packages() {{ :; }}; secure_config_files() {{ :; }}
+show_logs() {{ :; }}; refresh_client_config() {{ :; }}
+wget() {{ :; }}; unzip() {{ printf '#!/bin/sh\\nexit 0\\n' > "$5/snell-server"; }}
+{body}
+update_snell''', expected=expected)
+
+    def assert_no_update_leftovers(self):
+        self.assertEqual(sorted(p.name for p in self.binary.parent.iterdir()), ['snell-server'])
+
+    def test_update_restart_failure_rolls_back_previous_core(self):
+        restarts = self.root / 'restarts'
+        result = self.update_with_real_replace(f'''attempts=0
+restart_snell() {{ attempts=$((attempts+1)); head -c 8 '{self.binary}' >> '{restarts}'; echo >> '{restarts}'; [ "$attempts" -gt 1 ]; }}''', expected=1)
+        # 第一次以新内核重启失败，第二次以恢复后的旧内核重启。
+        self.assertEqual(restarts.read_text().splitlines(), ['#!/bin/s', 'old-core'])
+        self.assertEqual(self.binary.read_text(), 'old-core')
+        self.assertIn('已恢复旧内核，服务已重启', result.stderr)
+        self.assertNotIn('更新成功', result.stdout)
+        self.assert_no_update_leftovers()
+
+    def test_update_rollback_reports_service_still_broken(self):
+        result = self.update_with_real_replace('restart_snell() { echo RESTART; return 1; }', expected=1)
+        self.assertEqual(result.stdout.count('RESTART'), 2)
+        self.assertEqual(self.binary.read_text(), 'old-core')
+        self.assertIn('服务仍未能启动', result.stderr)
+        self.assert_no_update_leftovers()
+
+    def test_update_service_file_failure_restores_core_without_restart(self):
+        result = self.update_with_real_replace('''write_systemd_service() { return 1; }
+restart_snell() { echo UNEXPECTED_RESTART; }''', expected=1)
+        self.assertNotIn('UNEXPECTED_RESTART', result.stdout)
+        self.assertEqual(self.binary.read_text(), 'old-core')
+        self.assertIn('已恢复旧内核，服务保持停止', result.stderr)
+        self.assert_no_update_leftovers()
+
+    def test_successful_update_removes_previous_core(self):
+        for running in (True, False):
+            with self.subTest(running=running):
+                result = self.update_with_real_replace('restart_snell() { echo RESTARTED; }', running=running)
+                self.assertEqual('RESTARTED' in result.stdout, running)
+                self.assertTrue(self.binary.read_text().startswith('#!/bin/sh'))
+                self.assertIn('更新成功', result.stdout)
+                self.assert_no_update_leftovers()
+
+    def test_backup_failure_cancels_update_before_replacing_core(self):
+        result = self.update_with_real_replace('''ln() { return 1; }; cp() { return 1; }
+restart_snell() { echo UNEXPECTED_RESTART; }''', expected=1)
+        self.assertNotIn('UNEXPECTED_RESTART', result.stdout)
+        self.assertEqual(self.binary.read_text(), 'old-core')
+        self.assertIn('保留旧内核失败', result.stdout)
+        self.assert_no_update_leftovers()
+
+    def test_uninstall_removes_previous_core(self):
+        self.binary.write_text('core')
+        (self.binary.parent / '.snell-server.prev').write_text('old-core')
+        self.run_shell('''check_snell_running() { return 1; }; snell_process_exists() { return 1; }
+uninstall_snell''')
+        self.assertEqual(list(self.binary.parent.iterdir()), [])
+
     def test_binary_probe_repairs_dependencies_once_before_replacement(self):
         for outcome in ('recovered', 'still-broken', 'repair-failed'):
             with self.subTest(outcome=outcome):

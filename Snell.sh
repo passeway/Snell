@@ -883,7 +883,11 @@ snell_download_url() {
     printf 'https://dl.nssurge.com/snell/snell-server-%s-linux-%s.zip\n' "$VERSION" "$1"
 }
 
-# 在目标文件所在文件系统暂存，验证成功后原子替换；不创建备份。
+# 更新期间保留的旧内核；仅在更新失败时用于回滚，更新成功后删除。
+SNELL_BINARY_BACKUP=/usr/local/bin/.snell-server.prev
+
+# 在目标文件所在文件系统暂存，验证成功后原子替换。
+# 传入 keep-previous 时先以硬链接保留旧内核，供更新失败时回滚；否则不创建备份。
 replace_snell_binary() (
     local architecture stage
     architecture=$(get_architecture) || return 1
@@ -905,8 +909,38 @@ replace_snell_binary() (
             echo -e "${RED}新程序无法运行或检查超时，请检查架构和运行依赖${RESET}"; return 1;
         }
     fi
+    if [ "${1:-}" = keep-previous ] && [ -f /usr/local/bin/snell-server ]; then
+        # 硬链接与目标同一文件系统，不额外占用空间；不支持硬链接时复制。
+        ln -f /usr/local/bin/snell-server "$SNELL_BINARY_BACKUP" 2>/dev/null ||
+            cp -pf /usr/local/bin/snell-server "$SNELL_BINARY_BACKUP" || {
+            echo -e "${RED}保留旧内核失败，已取消更新${RESET}"; return 1;
+        }
+    fi
     mv -f "$stage/snell-server" /usr/local/bin/snell-server
 )
+
+# 更新失败时换回旧内核；更新前服务在运行时，用旧内核重新启动。
+rollback_snell_update() {
+    local was_running="$1"
+    if [ ! -f "$SNELL_BINARY_BACKUP" ]; then
+        fail "未找到更新前的内核，无法自动回滚；请通过菜单 7 排查"
+        return 1
+    fi
+    echo -e "${YELLOW}正在恢复更新前的内核${RESET}" >&2
+    mv -f "$SNELL_BINARY_BACKUP" /usr/local/bin/snell-server || {
+        fail "恢复旧内核失败；旧内核保留在 ${SNELL_BINARY_BACKUP}，可手动恢复为 /usr/local/bin/snell-server"
+        return 1
+    }
+    if (( was_running )); then
+        restart_snell || {
+            fail "已恢复旧内核，但服务仍未能启动；服务可能在更新前已异常，请通过菜单 7 排查"
+            return 1
+        }
+        echo -e "${YELLOW}更新未完成，已恢复旧内核，服务已重启${RESET}" >&2
+    else
+        echo -e "${YELLOW}更新未完成，已恢复旧内核，服务保持停止${RESET}" >&2
+    fi
+}
 
 snell_binary_version() { timeout --foreground -k 2 "${2:-10}" "$1" -v; }
 
@@ -1312,25 +1346,34 @@ _update_snell() {
     new_listen=$(preflight_snell_update "$listen") || return 1
     install_required_packages || return 1
     secure_config_files || { fail "设置配置文件权限失败"; return 1; }
-    replace_snell_binary || return 1
+    replace_snell_binary keep-previous || return 1
     # 服务文件随更新刷新，已安装的主机也能获得新的重启策略。
     if [ "$(get_system_type)" = alpine ]; then
-        write_openrc_service || { fail "新内核已替换，但服务文件更新失败，服务尚未重启"; return 1; }
+        write_openrc_service || {
+            fail "新内核已替换，但服务文件更新失败，服务尚未重启"
+            rollback_snell_update 0; return 1;
+        }
     else
         write_systemd_service && systemctl daemon-reload || {
-            fail "新内核已替换，但服务文件更新失败，服务尚未重启"; return 1;
+            fail "新内核已替换，但服务文件更新失败，服务尚未重启"
+            rollback_snell_update 0; return 1;
         }
     fi
     if [ "$new_listen" != "$listen" ]; then
-        apply_snell_setting listen "$new_listen" "监听地址" 0 || return 1
+        # 监听地址修改失败时，apply_snell_setting 已恢复原配置；再换回旧内核。
+        apply_snell_setting listen "$new_listen" "监听地址" 0 || {
+            rollback_snell_update "$was_running"; return 1;
+        }
     elif (( was_running )); then
         restart_snell || {
-            echo -e "${RED}新程序已替换，但重启失败；请通过菜单 7 排查。未创建备份。${RESET}"
+            echo -e "${RED}新程序已替换，但重启失败${RESET}"
+            rollback_snell_update "$was_running"
             return 1
         }
     else
         echo -e "${GREEN}服务保持停止状态，可通过菜单 3 启动${RESET}"
     fi
+    rm -f "$SNELL_BINARY_BACKUP"
     remove_snell_log_files || { fail "清理 Snell 旧日志文件失败"; return 1; }
     if (( was_running )) && [ "$(get_system_type)" != alpine ]; then show_logs recent; fi
     echo ""
@@ -1384,7 +1427,7 @@ _uninstall_snell() {
             systemctl reset-failed snell.service 2>/dev/null || true
         fi
     fi
-    rm -f /usr/local/bin/snell-server && rm -rf /etc/snell || { fail "清理 Snell 文件失败"; return 1; }
+    rm -f /usr/local/bin/snell-server "$SNELL_BINARY_BACKUP" && rm -rf /etc/snell || { fail "清理 Snell 文件失败"; return 1; }
     if (( found )); then
         echo -e "${GREEN}Snell 卸载成功${RESET}"
     else
