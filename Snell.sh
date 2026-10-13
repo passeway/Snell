@@ -412,7 +412,7 @@ render_client_config() {
         label=$(awk -F= 'NR==1 { gsub(/^[[:space:]]+|[[:space:]]+$/, "", $1); print $1 }' /etc/snell/snell-client.conf)
     fi
 
-    # Dual-stack exports IPv4 only; pure IPv6 exports IPv6 (no -v6 suffix).
+    # Dual-stack: IPv4 only. Pure IPv6: IPv6 only (no -v6 suffix).
     local ipv4_ok=0
     if valid_ipv4 "$address"; then
         ipv4_ok=1
