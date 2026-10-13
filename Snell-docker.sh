@@ -498,7 +498,13 @@ render_client_config() {
     local LC_ALL=C address="$1" label="$2" listen port psk mode endpoint status
     listen=$(config_value listen) && psk=$(config_value psk) || { fail "服务端配置缺少 listen 或 psk"; return 1; }
     listen=${listen//[[:space:]]/}
-    port=$(client_ipv4_port "$listen" "$address") || return 1
+    # 只导出一条节点：传入 IPv6 地址（纯 IPv6 服务器）时使用 IPv6 监听，否则使用 IPv4 监听。
+    if [[ "$address" == *:* ]]; then
+        endpoint=$(client_ipv6_endpoint "$listen") || { fail "服务没有可用的公网 IPv6 监听"; return 1; }
+        read -r address port <<< "$endpoint"
+    else
+        port=$(client_ipv4_port "$listen" "$address") || return 1
+    fi
     (( ${#psk} >= 12 && ${#psk} <= 255 )) || { fail "服务端 PSK 长度必须为 12-255 字节"; return 1; }
     if mode=$(config_value mode); then :
     else
@@ -509,16 +515,10 @@ render_client_config() {
     case "$mode" in default|unshaped|unsafe-raw) ;; *) fail "服务端 mode 无效"; return 1 ;; esac
     printf '%s = snell, %s, %s, psk=%s, version=6, mode=%s, reuse=true\n' \
         "$label" "$address" "$((10#$port))" "$(surge_value "$psk")" "$mode"
-    # 服务器有公网 IPv6 且服务监听 IPv6 时，额外导出一条 IPv6 节点。
-    if endpoint=$(client_ipv6_endpoint "$listen"); then
-        read -r address port <<< "$endpoint"
-        printf '%s-v6 = snell, %s, %s, psk=%s, version=6, mode=%s, reuse=true\n' \
-            "$label" "$address" "$port" "$(surge_value "$psk")" "$mode"
-    fi
 }
 
 main() {
-    local address label port
+    local address label port endpoint
     check_root || return 1
     [ "$(get_system_type)" != unknown ] || { fail "仅支持 Debian、Ubuntu 和 Alpine"; return 1; }
     get_architecture >/dev/null || return 1
@@ -536,8 +536,12 @@ main() {
     fi
     docker logs --tail 8 snell
 
+    # 双栈只导出 IPv4；获取不到公网 IPv4 但服务监听公网 IPv6 时（纯 IPv6）导出 IPv6。
     if address=$(get_public_ip); then
         label=$(get_country "$address")
+    elif endpoint=$(client_ipv6_endpoint "$(config_value listen)"); then
+        address=${endpoint% *}
+        label=Snell
     else
         echo -e "${YELLOW}自动获取公网 IPv4 失败，请将条目中的 YOUR_SERVER_IP 替换为服务器地址。${RESET}"
         address=YOUR_SERVER_IP

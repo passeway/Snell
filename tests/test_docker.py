@@ -112,16 +112,32 @@ class DockerInstallerTests(unittest.TestCase):
                          ['snell', '203.0.113.9', '40443', 'psk=a "quoted", secret',
                           'version=6', 'mode=unsafe-raw', 'reuse=true'])
 
-    def test_client_entry_adds_ipv6_node_for_ipv6_listener(self):
+    def test_client_entry_is_single_node_per_address_family(self):
         self.config.parent.mkdir(parents=True)
         self.config.write_text('[snell-server]\nlisten = 0.0.0.0:40443,[::]:40443\npsk = KeepThisSecret99\nmode = default\n')
+        # Dual stack exports the IPv4 node only.
         lines = self.run_shell('get_public_ipv6() { echo 2001:db8::1; }; render_client_config 203.0.113.9 JP').stdout.splitlines()
-        self.assertEqual(lines, [
-            'JP = snell, 203.0.113.9, 40443, psk=KeepThisSecret99, version=6, mode=default, reuse=true',
-            'JP-v6 = snell, 2001:db8::1, 40443, psk=KeepThisSecret99, version=6, mode=default, reuse=true'])
+        self.assertEqual(lines, ['JP = snell, 203.0.113.9, 40443, psk=KeepThisSecret99, version=6, mode=default, reuse=true'])
+        # An IPv6 address (IPv6-only server) exports the IPv6 node, without a -v6 suffix.
+        lines = self.run_shell('get_public_ipv6() { echo 2001:db8::1; }; render_client_config 2001:db8::1 JP').stdout.splitlines()
+        self.assertEqual(lines, ['JP = snell, 2001:db8::1, 40443, psk=KeepThisSecret99, version=6, mode=default, reuse=true'])
         self.config.write_text('[snell-server]\nlisten = 0.0.0.0:40443\npsk = KeepThisSecret99\nmode = default\n')
-        lines = self.run_shell('get_public_ipv6() { echo 2001:db8::1; }; render_client_config 203.0.113.9 JP').stdout.splitlines()
-        self.assertEqual(len(lines), 1)
+        result = self.run_shell('get_public_ipv6() { echo 2001:db8::1; }; render_client_config 2001:db8::1 JP', expected=1)
+        self.assertEqual(result.stdout, '')
+
+    def test_main_exports_ipv6_node_when_no_public_ipv4(self):
+        self.config.parent.mkdir()
+        self.config.write_text('[snell-server]\nlisten=0.0.0.0:40443,[::]:40443\npsk=OriginalSecret123\nmode=default\n')
+        stubs = ('check_root() { :; }; get_system_type() { echo debian; }; install_docker() { :; }\n'
+                 'write_compose_files() { :; }; docker() { :; }; wait_container() { :; }\n'
+                 'get_public_ip() { return 1; }; get_public_ipv6() { echo 2001:db8::1; }\n')
+        result = self.run_shell(stubs + 'main')
+        self.assertIn('Snell = snell, 2001:db8::1, 40443, psk=OriginalSecret123', result.stdout)
+        self.assertNotIn('YOUR_SERVER_IP', result.stdout)
+        # Without an IPv6 listener the placeholder entry is kept.
+        self.config.write_text('[snell-server]\nlisten=0.0.0.0:40443\npsk=OriginalSecret123\nmode=default\n')
+        result = self.run_shell(stubs + 'main')
+        self.assertIn('Snell = snell, YOUR_SERVER_IP, 40443,', result.stdout)
 
     def test_shared_ipv6_helpers_match_main_installer(self):
         main, docker = SOURCE.read_text(), DOCKER_SOURCE.read_text()
@@ -167,10 +183,12 @@ get_public_ip() { echo 203.0.113.9; }; get_country() { echo HK; }; main''')
             with self.subTest(listen=listen):
                 self.config.write_text(f'[snell-server]\nlisten={listen}\npsk=KeepThisSecret99\nmode=default\n')
                 lines = self.run_shell('get_public_ipv6() { echo 2001:db8::1; }; render_client_config 203.0.113.9 HK').stdout.splitlines()
+                self.assertEqual(len(lines), 1)
                 self.assertEqual(proxy_fields(lines[0].split('=', 1)[1])[1:3], ['203.0.113.9', expected4])
-                self.assertEqual(len(lines), 2 if expected6 else 1)
+                result = self.run_shell('get_public_ipv6() { echo 2001:db8::1; }; render_client_config 2001:db8::1 HK',
+                                        expected=0 if expected6 else 1)
                 if expected6:
-                    self.assertEqual(proxy_fields(lines[1].split('=', 1)[1])[1:3], list(expected6))
+                    self.assertEqual(proxy_fields(result.stdout.split('=', 1)[1])[1:3], list(expected6))
 
     def test_export_rejects_missing_or_ambiguous_ipv4_listener(self):
         self.config.parent.mkdir()

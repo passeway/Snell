@@ -853,21 +853,46 @@ replace_snell_binary() { echo UNEXPECTED_REPLACE; }; update_snell''', expected=1
         self.server_config()
         self.client.write_text('HK = snell, 203.0.113.1, 40443, psk=old\n')
         lines = self.run_shell('get_public_ipv6() { echo 2001:db8::1; }; refresh_client_config').stdout.splitlines()
+        self.assertEqual(lines, self.client.read_text().splitlines())
         self.assertEqual(len(lines), 1)
-        self.assertIn('HK = snell, 203.0.113.1, 40443,', lines[0])
-        self.assertNotIn('2001:db8', lines[0])
-        # Pure IPv6 fallback still works when no IPv4.
-        self.client.write_text('')
-        result = self.run_shell('get_public_ip() { return 1; }; get_public_ipv6() { echo 2001:db8::1; }; refresh_client_config')
-        self.assertIn('2001:db8::1', result.stdout)
-        self.assertNotIn('-v6', result.stdout)
+        self.assertTrue(lines[0].startswith('HK = snell, 203.0.113.1, 40443,'))
 
-    def test_export_keeps_existing_label_and_no_v6_suffix(self):
+    def test_export_ipv6_only_host_skips_ipv4_lookup(self):
         self.server_config()
-        self.client.write_text('东京 = snell, 203.0.113.1, 40443, psk=old\n')
-        lines = self.run_shell('get_public_ipv6() { echo 2001:db8::1; }; refresh_client_config').stdout.splitlines()
-        self.assertEqual(len(lines), 1)
-        self.assertTrue(lines[0].startswith('东京 = snell, 203.0.113.1, 40443,'))
+        # Without an IPv4 default route, no IPv4 lookup or prompt happens, and an
+        # existing node name is kept without a -v6 suffix.
+        for existing, want in [(None, 'Snell'), ('东京 = snell, 2001:db8::9, 40443, psk=old\n', '东京')]:
+            with self.subTest(existing=existing):
+                if existing:
+                    self.client.write_text(existing)
+                elif self.client.exists():
+                    self.client.unlink()
+                result = self.run_shell('ipv4_route_available() { return 1; }; get_public_ip() { echo UNEXPECTED_IPV4; }\n'
+                                        'get_country() { echo Snell; }; get_public_ipv6() { echo 2001:db8::1; }; refresh_client_config')
+                self.assertNotIn('UNEXPECTED', result.stdout + result.stderr)
+                self.assertEqual(self.client.read_text().splitlines(),
+                                 [f'{want} = snell, 2001:db8::1, 40443, psk=ChangedSecret=123456789, '
+                                  'version=6, mode=unshaped, reuse=true'])
+
+    def test_export_falls_back_to_ipv6_with_notice_when_ipv4_lookup_fails(self):
+        self.server_config()
+        result = self.run_shell('get_public_ip() { return 1; }; get_country() { echo HK; }\n'
+                                'get_public_ipv6() { echo 2001:db8::1; }; refresh_client_config')
+        self.assertIn('未获取到公网 IPv4，本次导出 IPv6 节点', result.stderr)
+        self.assertTrue(self.client.read_text().startswith('HK = snell, 2001:db8::1, 40443,'))
+        # No IPv4 and no public IPv6 listener: fail and keep the existing entry.
+        self.server.write_text(self.server.read_text().replace('[::]:40443,', ''))
+        self.client.write_text('HK = snell, , 40443, psk=old\n')
+        result = self.run_shell('get_public_ip() { return 1; }; get_public_ipv6() { echo 2001:db8::1; }; refresh_client_config',
+                                expected=1)
+        self.assertIn('没有可用的公网 IPv6 监听', result.stderr)
+        self.assertEqual(self.client.read_text(), 'HK = snell, , 40443, psk=old\n')
+
+    def test_ipv4_route_detection(self):
+        self.run_shell('ip() { echo "default via 192.0.2.1 dev eth0"; }; ipv4_route_available')
+        self.run_shell('ip() { :; }; ipv4_route_available', expected=1)
+        # If routes cannot be read, behave as before and look up IPv4.
+        self.run_shell('ip() { return 1; }; ipv4_route_available')
 
     def test_export_normalizes_leading_zero_ports(self):
         self.server_config()

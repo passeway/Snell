@@ -57,7 +57,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/passeway/Snell/main/Snell.sh
 ### 这个脚本做了什么
 
 - **多系统，一致体验**：Debian / Ubuntu / CentOS 使用 systemd，Alpine 使用 OpenRC，支持 AMD64 与 ARM64。
-- **自动双栈**：检测到 IPv6 时监听 `0.0.0.0:端口,[::]:端口`，找到公网 IPv6 地址时额外导出 IPv6 节点。
+- **自动双栈**：检测到 IPv6 时监听 `0.0.0.0:端口,[::]:端口`；只导出一条节点，双栈导出 IPv4，纯 IPv6 导出 IPv6。
 - **结果可核实**：启动、重启后检查真实的内核进程与监听端口，而不只是服务管理器的状态。
 - **安全的变更**：修改配置失败或被中断时自动恢复原配置；更新保留原有启停状态；同一时间只允许一个管理操作。
 
@@ -137,7 +137,7 @@ My-Snell = snell, YOUR_SERVER_IP, YOUR_PORT, psk=YOUR_PSK, version=6, mode=defau
 
 示例中的地址、端口和 PSK 为占位符，请直接复制实际输出。
 
-- **重新导出**：菜单 **8** 从当前服务端配置读取端口、PSK 和模式，保留已有地址与节点名（包括改过名的 IPv6 节点）。
+- **重新导出**：菜单 **8** 从当前服务端配置读取端口、PSK 和模式，保留已有地址与节点名。
 - **手动改过服务端配置**：先用 **5** 重启，再用 **8** 导出。
 - **PSK 含空格、逗号或引号**：请复制完整条目，保留其中的引号和转义符。
 
@@ -203,15 +203,18 @@ DNS 偏好只影响服务端连接目标域名时的地址族，继续使用已�
 ## 进阶说明
 
 <details>
-<summary><strong>IPv4 / IPv6 双栈与 IPv6 节点</strong></summary>
+<summary><strong>IPv4 / IPv6 双栈与导出节点</strong></summary>
 
 - IPv6 协议栈启用且存在 IPv6 地址时，自动监听 `0.0.0.0:端口,[::]:端口`，否则仅监听 IPv4。菜单 **4** 更新时会重新检测；手动指定的监听地址会保留。
-- 服务监听 IPv6 且可从外部连接时，除 IPv4 节点外还会导出一条名称带 `-v6` 的 IPv6 节点：
+- 只导出一条节点，名称不加 `-v6`：
+  - **双栈**：只导出 IPv4 节点。
+  - **纯 IPv6**（没有 IPv4 默认路由）：导出 IPv6 节点，不查询 IPv4，也不提示填写。
+  - 获取不到公网 IPv4 且提示时留空，改为导出 IPv6 节点，并给出提示。
+- IPv6 节点的地址取自监听配置：
   - 监听 `[::]` 时，使用默认 IPv6 路由所在网卡上的公网地址，WARP 等仅出站隧道的地址除外；
   - 监听指定公网 IPv6 时，直接使用该地址；
   - 回环、链路本地和内网地址不导出。
-- IPv6 节点的端口取 IPv6 监听端口，PSK 与模式和 IPv4 节点相同。
-- IPv4 与 IPv6 使用不同端口时，IPv4 节点匹配 IPv4 监听端口；无法确定时保留原客户端条目并提示检查。
+- 节点端口取对应地址族的监听端口；无法确定 IPv4 端口时保留原客户端条目并提示检查。
 - 公网 IPv6 接入同样需要在防火墙中放行端口。v6 用 TCP 承载 UDP 转发，无需额外开放同端口 UDP。
 
 </details>
@@ -226,7 +229,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/passeway/Snell/main/Snell-do
 ```
 
 - 缺少时自动安装 Docker 与 Compose 插件，在本地用官方内核构建 `snell-server` 镜像（不依赖第三方镜像），以 host 网络运行。
-- 输出 Surge 代理条目，服务器有公网 IPv6 时额外输出 `-v6` 节点；重复运行保留已有端口和 PSK。
+- 输出一条 Surge 代理条目：双栈输出 IPv4，纯 IPv6 输出 IPv6；重复运行保留已有端口和 PSK。
 - 文件位于 `/root/snell-docker/`，配置为 `snell-conf/snell.conf`。
 - 通过 `docker compose` 管理，不使用本菜单；不要与菜单安装的服务同时占用同一端口。
 
@@ -263,7 +266,7 @@ rc-service snell status
 
 - **Alpine 日志**：默认不保存 Snell 日志，也不配置日志轮转或定时任务。临时排查时先执行 `rc-service snell stop`，再运行 `/usr/local/bin/snell-server -l info -c /etc/snell/snell-server.conf` 在终端查看输出；结束后按 `Ctrl+C`，执行 `rc-service snell start` 恢复服务。
 - **实时日志**：Debian / Ubuntu / CentOS 的菜单 **7** 中按 `Ctrl+C` 返回菜单。
-- **公网 IPv4 查询失败**：可手动输入；取消后可用菜单 **8** 重试。国家信息不可用时，节点名默认为 `Snell`。
+- **公网 IPv4 查询失败**：可手动输入；留空时如有可用的公网 IPv6 则导出 IPv6 节点，之后可用菜单 **8** 重试。国家信息不可用时，节点名默认为 `Snell`。
 - **卸载被阻止**：服务无法确认已停止，或仍有前台运行的 Snell 进程时，卸载会保留全部文件；请先停止后重试。
 - **反馈问题**：请附上系统、架构、服务端与客户端版本及错误日志，并隐藏 PSK。
 
