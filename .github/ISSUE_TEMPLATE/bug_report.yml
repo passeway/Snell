@@ -1,0 +1,70 @@
+name: 问题反馈 / Bug report
+description: 脚本安装、运行或管理出错 / Something in the script does not work
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        提交前请先查看 README 的故障排查部分，并隐藏 PSK、服务器 IP 等敏感信息。
+        Please check the troubleshooting section of the README first, and hide your PSK and server IP.
+  - type: dropdown
+    id: system
+    attributes:
+      label: 系统 / System
+      options:
+        - Debian
+        - Ubuntu
+        - CentOS Stream / RHEL 兼容
+        - Alpine
+        - 其他 / Other
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: 系统版本与架构 / OS version and architecture
+      placeholder: Debian 12, AMD64
+    validations:
+      required: true
+  - type: dropdown
+    id: method
+    attributes:
+      label: 部署方式 / Deployment
+      options:
+        - Snell.sh（一键脚本 / one-command script）
+        - Snell-docker.sh（Docker）
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤 / Steps to reproduce
+      placeholder: |
+        1. 运行安装命令 / Run the install command
+        2. 选择菜单 ... / Choose menu option ...
+        3. 出现 ... / See ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望结果与实际结果 / Expected and actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: 相关日志 / Logs
+      description: |
+        Debian / Ubuntu / CentOS：`systemctl status snell --no-pager` 和 `journalctl -u snell -n 50 --no-pager`
+        Alpine：`rc-service snell status`
+      render: text
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: 确认 / Checklist
+      options:
+        - label: 已使用最新脚本重新运行过 / I re-ran the latest script
+          required: true
+        - label: 已隐藏 PSK、服务器 IP 等敏感信息 / I removed my PSK, server IP and other secrets
+          required: true
