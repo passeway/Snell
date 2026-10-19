@@ -50,7 +50,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/passeway/Snell/main/Snell.sh
 
 </details>
 
-> The installer currently uses the official **v6.0.0rc2** release candidate with `mode=default`. Your client must support Snell v6 and use the same `mode` as the server. Until the final v6 release, the protocol may still change incompatibly, so keep both client and server up to date (update the server with option **4**).
+> The installer uses the official **v6.0.0** stable release with `mode=default`. Your client must support Snell v6 and use the same `mode` as the server. Use option **4** to update the server.
 
 > CentOS support covers the maintained **CentOS Stream 9 / 10** (RHEL-compatible systems such as Rocky and AlmaLinux also install with `dnf`, and **Rocky Linux 8** is verified in CI); CentOS 7 (no `dnf`) is not supported, and end-of-life CentOS 8 is not recommended because its official repositories are offline. With firewalld enabled, allow the port with `firewall-cmd --permanent --add-port=PORT/tcp && firewall-cmd --reload`.
 
