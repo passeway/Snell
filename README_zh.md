@@ -50,7 +50,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/passeway/Snell/main/Snell.sh
 
 </details>
 
-> 当前安装官方 **v6.0.0rc2** 候选版（RC），默认 `mode=default`。客户端需支持 Snell v6，且 `mode` 与服务端一致。v6 正式版发布前协议仍可能出现不兼容变更，请让客户端与服务端都保持最新版本（服务端用菜单 **4** 更新）。
+> 当前安装官方 **v6.0.0** 正式版，默认 `mode=default`。客户端需支持 Snell v6，且 `mode` 与服务端一致。服务端可通过菜单 **4** 更新。
 
 > CentOS 支持仍在维护的 **CentOS Stream 9 / 10**（Rocky、AlmaLinux 等 RHEL 兼容系统同样使用 `dnf` 安装，**Rocky Linux 8** 已在 CI 中验证）；不带 `dnf` 的 CentOS 7 不受支持；CentOS 8 已停止维护、官方软件源已下线，不建议使用。启用了 firewalld 时，放行端口可执行 `firewall-cmd --permanent --add-port=端口/tcp && firewall-cmd --reload`。
 
