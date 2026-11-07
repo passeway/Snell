@@ -1,7 +1,7 @@
 #!/bin/bash
 # 使用 Docker Compose 部署 Snell v6。镜像在本地由官方内核构建，不依赖第三方镜像。
 
-VERSION="v6.0.0rc2"
+VERSION="v6.0.0"
 BASE_DIR="/root/snell-docker"
 RED='\033[0;31m'
 GREEN='\033[0;32m'
